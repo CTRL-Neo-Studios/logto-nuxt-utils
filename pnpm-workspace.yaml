@@ -1,0 +1,9 @@
+packages:
+  - playground
+
+# Mirrors the policy used in the consuming projects. Vite 8 builds with
+# rolldown/oxc, so esbuild's native postinstall is unnecessary, and unrs-resolver
+# is only used by ESLint's import resolver.
+allowBuilds:
+  esbuild: false
+  unrs-resolver: false

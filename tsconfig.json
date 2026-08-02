@@ -1,0 +1,12 @@
+{
+  "extends": "./.nuxt/tsconfig.json",
+  "exclude": [
+    "dist",
+    "node_modules",
+    "playground",
+    // Fixtures are standalone Nuxt apps whose types (auto-imports, `logto` config
+    // key) only exist once `@nuxt/test-utils` prepares them at test time. They are
+    // type-checked implicitly by the tests that build them.
+    "test/fixtures"
+  ]
+}

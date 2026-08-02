@@ -1,0 +1,75 @@
+{
+  "name": "@type32/logto-nuxt-utils",
+  "version": "0.1.0",
+  "description": "Logto RBAC utilities for Nuxt: typed permissions, server guards and cross-instance token verification.",
+  "repository": "https://github.com/CTRL-Neo-Studios/logto-nuxt-utils",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.mts",
+      "import": "./dist/module.mjs",
+      "default": "./dist/module.mjs"
+    },
+    "./config": {
+      "types": "./dist/runtime/config.d.ts",
+      "import": "./dist/runtime/config.js",
+      "default": "./dist/runtime/config.js"
+    },
+    "./types": {
+      "types": "./dist/runtime/types.d.ts",
+      "import": "./dist/runtime/types.js",
+      "default": "./dist/runtime/types.js"
+    }
+  },
+  "main": "./dist/module.mjs",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/types.d.mts"
+      ],
+      "config": [
+        "./dist/runtime/config.d.ts"
+      ],
+      "types": [
+        "./dist/runtime/types.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prepack": "nuxt-module-build build",
+    "dev": "pnpm run dev:prepare && nuxt dev playground",
+    "dev:build": "nuxt build playground",
+    "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxt prepare playground",
+    "release": "pnpm run test && pnpm run prepack && changelogen --release && pnpm publish && git push --follow-tags",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:types": "vue-tsc --noEmit && cd playground && vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@nuxt/kit": "^4.5.1",
+    "c12": "^3.3.4",
+    "jose": "^6.2.6",
+    "nuxt-authorization": "^0.3.5"
+  },
+  "peerDependencies": {
+    "@logto/nuxt": ">=1.2.0"
+  },
+  "devDependencies": {
+    "@logto/nuxt": "^1.2.10",
+    "@nuxt/devtools": "^3.3.1",
+    "@nuxt/module-builder": "^1.0.3",
+    "@nuxt/schema": "^4.5.1",
+    "@nuxt/test-utils": "^4.1.0",
+    "@types/node": "latest",
+    "changelogen": "^0.6.2",
+    "nuxt": "^4.5.1",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.8"
+  }
+}
