@@ -1,4 +1,3 @@
-import { relative } from 'node:path'
 import {
   addImports,
   addPlugin,
@@ -13,31 +12,110 @@ import {
   installModule,
   useLogger,
 } from '@nuxt/kit'
-import { loadConfig } from 'c12'
-import type { RbacConfig } from './runtime/types'
 
+/**
+ * A resource this app wants tokens for but does **not** own.
+ *
+ * The object form exists so another service's scopes can be requested without
+ * adding them to `permissions` — which would wrongly pull them into this app's own
+ * `Permission` union.
+ */
+export type AdditionalResource =
+  | string
+  | {
+    /** The other service's API resource indicator. */
+    resource: string
+    /** Scopes to request for it, if it defines any you need. */
+    scopes?: readonly string[]
+  }
+
+/**
+ * Module options, configured under the `logtoRbac` key in `nuxt.config`.
+ *
+ * The RBAC surface lives here rather than in a separate config file, so Nuxt
+ * handles typing, layer merging and dev restarts on change for free.
+ *
+ * A large permission catalogue does not have to live inline — plain TypeScript is
+ * enough to keep it in its own file:
+ *
+ * ```ts
+ * // rbac.ts
+ * export const PERMISSIONS = ['assessment:view', 'assessment:edit'] as const
+ *
+ * // nuxt.config.ts
+ * import { PERMISSIONS } from './rbac'
+ * export default defineNuxtConfig({
+ *   logtoRbac: { resources: ['https://…/api/v1'], permissions: [...PERMISSIONS] },
+ * })
+ * ```
+ */
 export interface ModuleOptions {
   /**
-   * Path to the RBAC config file, relative to the project root.
+   * Indicators of the Logto API resources this app **owns**.
    *
-   * Defaults to discovering `rbac.config.{ts,mts,js,mjs}` at the project root.
+   * These are *identifiers*, not endpoints Logto ever calls, so the production URL
+   * is normally used in development too. Each must match the value configured in the
+   * Logto console byte-for-byte.
+   *
+   * A trailing slash makes it a *different* resource to Logto, which surfaces as a
+   * silently empty `scope` claim rather than an error; the module warns about this at
+   * build time.
+   *
+   * Two consequences of listing more than one:
+   *
+   * - Permissions are unioned across all of them, which costs one access token per
+   *   resource. Each is cached in the encrypted session cookie, so a long list can
+   *   approach the ~4KB cookie limit.
+   * - **All of them are accepted as the `aud` of an inbound bearer token.** Only list
+   *   resources this app actually serves; resources belonging to other services go in
+   *   {@link ModuleOptions.additionalResources}, otherwise a token minted for another
+   *   service would be accepted here.
+   *
+   * @example ['https://tc-manifold.ctrl-neo.dev/api/v1']
    */
-  configFile?: string
+  resources?: readonly string[]
+  /**
+   * Resources belonging to *other* services, requested at sign-in so this app can
+   * call them.
+   *
+   * Deliberately kept apart from {@link ModuleOptions.resources}: entries here are
+   * never a valid inbound audience and never contribute to this app's permissions.
+   * Retrieve a token for one with `useLogtoAccessToken(event, resource)`.
+   */
+  additionalResources?: readonly AdditionalResource[]
+  /**
+   * Every permission this app's own API resources define.
+   *
+   * Each entry must exist verbatim as a permission in the Logto console. Logto
+   * silently omits scopes it does not recognise from the issued access token rather
+   * than erroring, so a typo shows up as a mysteriously missing permission.
+   *
+   * This list is the sole source of the `Permission` type.
+   */
+  permissions?: readonly string[]
+  /**
+   * Additional Logto user scopes to request beyond the defaults.
+   *
+   * The module always requests `roles`, `email` and `profile`. Add
+   * `'urn:logto:scope:organizations'` and `'urn:logto:scope:organization_roles'` here
+   * if you need organization data in the token claims.
+   */
+  userScopes?: readonly string[]
   /**
    * Route the session endpoint is mounted at.
    *
-   * The browser cannot read its own permissions — they live in the `scope` claim
-   * of an access token inside an httpOnly cookie — so this endpoint is what makes
+   * The browser cannot read its own permissions — they live in the `scope` claim of
+   * an access token inside an httpOnly cookie — so this endpoint is what makes
    * client-side ability checks possible.
    */
   sessionEndpoint?: string
   /**
    * Register `nuxt-authorization` automatically.
    *
-   * It requires no configuration of its own, so installing it here saves
-   * consumers a line. `@logto/nuxt` is deliberately *not* auto-installed, since
-   * you must configure its endpoint, credentials and pathnames in `nuxt.config`
-   * regardless — it should stay visible there.
+   * It requires no configuration of its own, so installing it here saves consumers
+   * a line. `@logto/nuxt` is deliberately *not* auto-installed, since you must
+   * configure its endpoint, credentials and pathnames in `nuxt.config` regardless —
+   * it should stay visible there.
    */
   installAuthorizationModule?: boolean
 }
@@ -52,12 +130,12 @@ export interface ModuleOptions {
  * These are the literal values of `UserScope.Roles` / `.Email` / `.Profile` from
  * `@logto/nuxt`. They are inlined rather than imported because `@logto/nuxt` is a
  * peer dependency whose root export is itself a Nuxt module; importing it here
- * would make this module hard-fail when the peer is missing, instead of emitting
- * the actionable warning below.
+ * would make this module hard-fail when the peer is missing, instead of emitting the
+ * actionable warning below.
  */
 const BASE_USER_SCOPES = ['roles', 'email', 'profile'] as const
 
-/** This package's own name, used for the config alias and type augmentations. */
+/** This package's own name, used for the generated type augmentation. */
 const PACKAGE_NAME = '@type32/logto-nuxt-utils'
 
 /**
@@ -84,6 +162,10 @@ export default defineNuxtModule<ModuleOptions>({
     compatibility: { nuxt: '>=4.0.0' },
   },
   defaults: {
+    resources: [],
+    additionalResources: [],
+    permissions: [],
+    userScopes: [],
     sessionEndpoint: '/api/_auth/session',
     installAuthorizationModule: true,
   },
@@ -101,48 +183,23 @@ export default defineNuxtModule<ModuleOptions>({
 
     // ---------------------------------------------------------------- config
 
-    const { config, configFile } = await loadConfig<Partial<RbacConfig>>({
-      cwd: nuxt.options.rootDir,
-      name: 'rbac',
-      configFile: options.configFile,
-      /**
-       * Lets `rbac.config.ts` import `defineRbacConfig` from this package by name.
-       *
-       * c12 loads that file through jiti, which resolves via CommonJS. Without this
-       * alias the import depends entirely on the published `exports` map, and in
-       * particular breaks during development: `nuxt-module-build build --stub`
-       * wipes `dist/` and emits only the module entry, so `dist/runtime/config.js`
-       * does not exist.
-       *
-       * `resolver.resolve` points at `src/` when stubbed and `dist/` when built, so
-       * one expression covers both.
-       */
-      jitiOptions: {
-        alias: {
-          [`${PACKAGE_NAME}/config`]: resolver.resolve('./runtime/config'),
-        },
-      },
-    })
-
-    const ownedResources = unique((config?.resources ?? []).map(entry => entry.trim()))
-    const additionalResources = (config?.additionalResources ?? [])
+    const ownedResources = unique((options.resources ?? []).map(entry => entry.trim()))
+    const additionalResources = (options.additionalResources ?? [])
       .map(entry => (typeof entry === 'string' ? { resource: entry } : entry))
       .map(entry => ({ resource: entry.resource.trim(), scopes: unique(entry.scopes ?? []) }))
       .filter(entry => entry.resource.length > 0)
     const additionalResourceIndicators = unique(additionalResources.map(entry => entry.resource))
-    const permissions = unique(config?.permissions ?? [])
-    const hasConfig = Boolean(configFile && ownedResources.length > 0)
+    const permissions = unique(options.permissions ?? [])
 
-    if (!configFile || ownedResources.length === 0) {
+    if (ownedResources.length === 0) {
       logger.warn(
-        'No `rbac.config.ts` with a non-empty `resources` array was found at the project '
-        + 'root. Permissions will not be requested and `Permission` will fall back to '
-        + '`string`.',
+        'No `logtoRbac.resources` configured. Permissions will not be requested and '
+        + '`Permission` will fall back to `string`.',
       )
     }
     else {
-      // A trailing slash makes it a *different* resource to Logto, which surfaces
-      // as a silently empty `scope` claim rather than an error — worth catching here.
+      // A trailing slash makes it a *different* resource to Logto, which surfaces as
+      // a silently empty `scope` claim rather than an error — worth catching here.
       for (const resource of [...ownedResources, ...additionalResourceIndicators]) {
         if (resource.endsWith('/')) {
           logger.warn(
@@ -167,12 +224,10 @@ export default defineNuxtModule<ModuleOptions>({
       }
 
       if (permissions.length === 0) {
-        logger.warn(`No permissions declared in ${configFile}; only role names will be available.`)
+        logger.warn(
+          'No `logtoRbac.permissions` declared; only role names will be available.',
+        )
       }
-
-      // Re-run the build when the config changes, since scopes and types derive from it.
-      nuxt.options.watch ||= []
-      nuxt.options.watch.push(configFile)
     }
 
     // ------------------------------------------------- logto config injection
@@ -180,12 +235,13 @@ export default defineNuxtModule<ModuleOptions>({
     /**
      * Injected in `modules:done` so it runs after `@logto/nuxt`'s own setup.
      *
-     * That module computes `defu(runtimeConfig.logto, options, defaults)` and
-     * assigns the result. Mutating the finished object afterwards gives
-     * deterministic control over de-duplication, and `runtimeConfig` is not
-     * serialised until much later in the build, so the change still lands.
+     * That module computes `defu(runtimeConfig.logto, options, defaults)` and assigns
+     * the result. Mutating the finished object afterwards gives deterministic control
+     * over de-duplication, and `runtimeConfig` is not serialised until much later in
+     * the build, so the change still lands.
      *
-     * This is what removes the need to restate permissions in `nuxt.config`.
+     * This is what removes the need to restate permissions in `nuxt.config`'s `logto`
+     * block.
      */
     nuxt.hook('modules:done', () => {
       const runtimeConfig = nuxt.options.runtimeConfig as unknown as {
@@ -205,7 +261,7 @@ export default defineNuxtModule<ModuleOptions>({
       logto.scopes = unique([
         ...(logto.scopes ?? []),
         ...BASE_USER_SCOPES,
-        ...(config?.userScopes ?? []),
+        ...(options.userScopes ?? []),
         ...permissions,
         // Another service's scopes must be granted for this app to call it, but they
         // are deliberately absent from `permissions` so they never leak into this
@@ -273,58 +329,58 @@ export default defineNuxtModule<ModuleOptions>({
     // --------------------------------------------------------------- types
 
     /**
-     * Populates the permission registry by *inferring* from the consumer's config
-     * file, rather than stringifying a union into generated code.
+     * Populates the permission registry with a generated literal union.
      *
-     * Inference means the type can never drift from `rbac.config.ts`, and there is
-     * no generated union to regenerate after an edit. `Record<Union, true>` is a
-     * mapped type with statically known members, which an interface may extend.
+     * The union has to be written out rather than inferred from `nuxt.config`:
+     * `defineNuxtConfig` is typed as `(input: InputConfig<NuxtConfig>) =>
+     * InputConfig<NuxtConfig>`, so it is not generic over its argument and the
+     * literal types of `permissions` are widened to `string[]` on the way out.
+     *
+     * Generated code cannot go stale here, because editing `nuxt.config` restarts
+     * Nuxt and regenerates this file.
+     *
+     * `Record<Union, true>` is a mapped type with statically known members, which an
+     * interface may extend.
      */
     addTypeTemplate({
       filename: 'types/logto-rbac.d.ts',
       getContents: () => {
-        if (!hasConfig || permissions.length === 0) {
+        if (permissions.length === 0) {
           return [
-            '// No rbac.config.ts resolved, so `Permission` stays `string`.',
+            '// No `logtoRbac.permissions` configured, so `Permission` stays `string`.',
             'export {}',
             '',
           ].join('\n')
         }
 
-        const specifier = relative(
-          resolver.resolve(nuxt.options.buildDir, 'types'),
-          configFile!,
-        )
-          .replace(/\\/gu, '/')
-          .replace(/\.(?:ts|mts|cts|js|mjs|cjs)$/u, '')
+        // JSON.stringify handles quoting and escaping, so a permission containing a
+        // quote or backslash cannot break out of the generated type.
+        const union = permissions.map(permission => JSON.stringify(permission)).join(' | ')
 
         return [
           `declare module '${PACKAGE_NAME}/types' {`,
-          `  interface RbacPermissionMap extends Record<`,
-          `    (typeof import('${specifier}').default)['permissions'][number],`,
-          `    true`,
-          `  > {}`,
+          `  interface RbacPermissionMap extends Record<${union}, true> {}`,
           `}`,
           '',
           'export {}',
           '',
         ].join('\n')
       },
-    // `Permission` is referenced by the server guards and by client-side
-    // abilities alike, so the augmentation has to reach every TS project Nuxt
-    // generates, not just the default `nuxt` one.
+    // `Permission` is referenced by the server guards and by client-side abilities
+    // alike, so the augmentation has to reach every TS project Nuxt generates, not
+    // just the default `nuxt` one.
     }, { nitro: true, nuxt: true, node: true, shared: true })
 
     /**
      * Ambient declaration for `#logto`.
      *
-     * `@logto/nuxt` registers that alias through Nitro, and although Nuxt does copy
-     * it into the server project's `paths`, importing it still fails to resolve in
+     * `@logto/nuxt` registers that alias through Nitro, and although Nuxt does copy it
+     * into the server project's `paths`, importing it still fails to resolve in
      * practice — reproduced across two separate projects. This declaration makes it
      * resolve deterministically in every context.
      *
-     * The `config` parameter is intentionally permissive: the type Nuxt generates
-     * for `runtimeConfig.logto` contains only the keys actually set in `nuxt.config`,
+     * The `config` parameter is intentionally permissive: the type Nuxt generates for
+     * `runtimeConfig.logto` contains only the keys actually set in `nuxt.config`,
      * whereas the package's own `LogtoRuntimeConfig` marks further keys as required,
      * so the stricter type would reject a valid call.
      */

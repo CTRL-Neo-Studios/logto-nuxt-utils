@@ -10,17 +10,17 @@ const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
 
 /**
  * `nuxt-module-build build --stub` wipes `dist/` and emits only the module entry,
- * so these checks are meaningful only against a full build. CI runs `prepack`
- * before the tests for exactly this reason.
+ * so file-existence checks are meaningful only against a full build. CI runs
+ * `prepack` before the tests for exactly this reason.
  */
-const isFullBuild = existsSync(resolve(root, 'dist/runtime/config.js'))
+const isFullBuild = existsSync(resolve(root, 'dist/runtime/types.js'))
 
 describe('package exports', () => {
   it('declares a CJS-resolvable condition for every subpath', () => {
-    // `rbac.config.ts` is loaded through jiti, which resolves via CommonJS. A subpath
-    // offering only `import` + `types` makes Node throw ERR_PACKAGE_PATH_NOT_EXPORTED
-    // ("Package subpath ... is not defined by exports"), which is how this broke
-    // before: TypeScript resolved happily through `types` while runtime failed.
+    // A subpath offering only `import` + `types` makes CommonJS resolution throw
+    // ERR_PACKAGE_PATH_NOT_EXPORTED ("Package subpath ... is not defined by
+    // exports"). That is how a previous release broke: TypeScript resolved happily
+    // through `types` while anything resolving via `require` failed.
     for (const [subpath, conditions] of Object.entries(pkg.exports)) {
       expect(
         conditions.require ?? conditions.default,

@@ -33,32 +33,56 @@ export default defineNuxtConfig({
     appSecret: process.env.NUXT_LOGTO_APP_SECRET,
     cookieEncryptionKey: process.env.NUXT_LOGTO_COOKIE_ENCRYPTION_KEY,
   },
+
+  logtoRbac: {
+    // Resources this app OWNS. Permissions union across these, and only these are
+    // accepted as the `aud` of an inbound bearer token.
+    resources: [process.env.NUXT_LOGTO_API_RESOURCE!],
+
+    permissions: [
+      'assessment:create',
+      'assessment:view',
+      'assessment:list',
+      'assessment:test',
+      'assessment:delete',
+      'assessment:share',
+      'assessment:edit',
+    ],
+  },
 })
 ```
 
-Note there is **no `scopes` or `resources`** here. The module derives both from
-`rbac.config.ts`, which is the entire point.
+Note the `logto` block declares **no `scopes` and no `resources`**. The module
+derives both from `logtoRbac`, which is the entire point — the permission list is
+written once.
+
+### Keeping the catalogue in its own file
+
+No framework helper is needed; plain TypeScript is enough:
 
 ```ts
-// rbac.config.ts
-import { defineRbacConfig } from '@type32/logto-nuxt-utils/config'
+// rbac.ts
+export const PERMISSIONS = [
+  'assessment:create',
+  'assessment:view',
+] as const
+```
 
-export default defineRbacConfig({
-  // Resources this app OWNS. Permissions union across these, and only these are
-  // accepted as the `aud` of an inbound bearer token.
-  resources: ['https://tc-manifold.ctrl-neo.dev/api/v1'],
+```ts
+// nuxt.config.ts
+import { PERMISSIONS } from './rbac'
 
-  permissions: [
-    'assessment:create',
-    'assessment:view',
-    'assessment:list',
-    'assessment:test',
-    'assessment:delete',
-    'assessment:share',
-    'assessment:edit',
-  ],
+export default defineNuxtConfig({
+  logtoRbac: {
+    resources: [process.env.NUXT_LOGTO_API_RESOURCE!],
+    permissions: [...PERMISSIONS],
+  },
 })
 ```
+
+Because these are ordinary module options, Nuxt also **merges them across layers**
+(arrays concatenate), so a shared base layer can define common permissions and each
+app append its own. Duplicates are de-duplicated by the module.
 
 ### Calling other services
 
@@ -67,7 +91,7 @@ requested at sign-in so a token can be minted, but are **never** a valid inbound
 audience and **never** contribute permissions:
 
 ```ts
-export default defineRbacConfig({
+logtoRbac: {
   resources: ['https://tc-manifold.ctrl-neo.dev/api/v1'],
 
   additionalResources: [
@@ -78,7 +102,7 @@ export default defineRbacConfig({
   ],
 
   permissions: ['assessment:view'],
-})
+}
 ```
 
 ```ts
@@ -90,8 +114,8 @@ await $fetch('https://sibling.ctrl-neo.dev/api/v1/things', {
 
 **Why the two lists are separate.** An access token's `aud` states which API it was
 minted for, and verifying it is what stops a token for one service being replayed
-against another. If a sibling's resource were accepted as a valid audience here,
-a token minted for that sibling would be honoured by this app — and because scope
+against another. If a sibling's resource were accepted as a valid audience here, a
+token minted for that sibling would be honoured by this app — and because scope
 names realistically overlap between services in the same suite (`assessment:view`
 and friends), it could satisfy a permission check it was never intended for. Keeping
 "resources I can get tokens for" apart from "audiences I accept" removes that class
@@ -176,7 +200,10 @@ Code alone is not enough:
 
 ```ts
 logtoRbac: {
-  configFile: 'rbac.config.ts',            // default: discovered at project root
+  resources: [],                           // required: resources this app owns
+  additionalResources: [],                 // other services, for outbound calls
+  permissions: [],                         // sole source of the `Permission` type
+  userScopes: [],                          // extra Logto user scopes
   sessionEndpoint: '/api/_auth/session',   // default
   installAuthorizationModule: true,        // default
 }
@@ -184,8 +211,8 @@ logtoRbac: {
 
 ## Migrating a project that inlined this logic
 
-If you previously hand-rolled these utilities, install the module and add
-`rbac.config.ts`, then delete:
+If you previously hand-rolled these utilities, install the module and add the
+`logtoRbac` block, then delete:
 
 - `shared/rbac.ts`
 - `server/utils/**` RBAC helpers (`useServerLogto*`, auth context, verify, guards)

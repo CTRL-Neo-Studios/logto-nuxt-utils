@@ -1,3 +1,5 @@
+import { PERMISSIONS } from './rbac'
+
 export default defineNuxtConfig({
   modules: ['@logto/nuxt', '@type32/logto-nuxt-utils'],
 
@@ -5,9 +7,8 @@ export default defineNuxtConfig({
   compatibilityDate: 'latest',
 
   /**
-   * Only the connection details live here. The permission list and API resource
-   * come from `rbac.config.ts`, and the module derives `logto.scopes` and
-   * `logto.resources` from it — that is the whole point of the module.
+   * Only connection details here. `scopes` and `resources` are deliberately absent:
+   * the module derives both from `logtoRbac` below, which is the whole point.
    */
   logto: {
     endpoint: process.env.NUXT_LOGTO_ENDPOINT || 'https://replace-me.logto.app',
@@ -17,10 +18,13 @@ export default defineNuxtConfig({
     pathnames: {
       signIn: '/signin',
       signOut: '/signout',
-      callback: '/api/v1/auth/callback',
+      callback: '/api/auth/callback',
     },
     postCallbackRedirectUri: '/',
   },
 
-  logtoRbac: {},
+  logtoRbac: {
+    resources: ['https://playground.example.com/api/v1'],
+    permissions: [...PERMISSIONS],
+  },
 })

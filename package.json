@@ -12,11 +12,6 @@
       "import": "./dist/module.mjs",
       "default": "./dist/module.mjs"
     },
-    "./config": {
-      "types": "./dist/runtime/config.d.ts",
-      "import": "./dist/runtime/config.js",
-      "default": "./dist/runtime/config.js"
-    },
     "./types": {
       "types": "./dist/runtime/types.d.ts",
       "import": "./dist/runtime/types.js",
@@ -28,9 +23,6 @@
     "*": {
       ".": [
         "./dist/types.d.mts"
-      ],
-      "config": [
-        "./dist/runtime/config.d.ts"
       ],
       "types": [
         "./dist/runtime/types.d.ts"
@@ -52,7 +44,6 @@
   },
   "dependencies": {
     "@nuxt/kit": "^4.5.1",
-    "c12": "^3.3.4",
     "jose": "^6.2.6",
     "nuxt-authorization": "^0.3.5"
   },
