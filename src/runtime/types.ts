@@ -66,14 +66,19 @@ export interface AuthContext {
   /**
    * Role *names* held by the user.
    *
-   * Populated for `session` callers only. Logto access tokens carry no `roles`
-   * claim 鈥?only ID tokens do 鈥?so bearer callers always see an empty array.
-   * Prefer permission checks over role checks for anything that must work
+   * Always populated for `session` callers, since `roles` is an ID-token claim.
+   *
+   * Normally **empty for `bearer` callers**: Logto does not include roles in access
+   * tokens by default, so a sibling service presenting one asserts its permissions
+   * but not its role names. A Logto JWT customizer can add a `roles` claim, in which
+   * case it is honoured. Prefer permission checks for anything that must work
    * service-to-service.
    *
-   * Note also that Logto role names are mutable display strings (they may even
-   * contain spaces), so renaming a role in the console will silently invalidate
-   * any hard-coded role check.
+   * Note also that Logto role names are mutable display strings — they may contain
+   * spaces and can be renamed in the console — so renaming a role silently
+   * invalidates any hard-coded role check. In Logto a role is a bundle of
+   * permissions, so checking permissions tests the *effect* of a role and is the more
+   * durable choice.
    */
   roles: string[]
   /**

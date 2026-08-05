@@ -79,10 +79,11 @@ export async function requireAnyPermission(
 /**
  * Requires the caller to hold at least one of the listed roles.
  *
- * Prefer {@link requirePermission} wherever possible. Role names are only
- * available to session callers, so a role guard always rejects a sibling service
- * authenticating with a bearer token, and Logto role names are mutable display
- * strings that can be renamed in the console.
+ * Prefer {@link requirePermission} wherever possible. Roles arrive via the ID token,
+ * so a bearer caller normally carries none and is rejected unless your access tokens
+ * include a `roles` claim through a Logto JWT customizer. Logto role names are also
+ * mutable display strings that can be renamed in the console, and a role is just a
+ * bundle of permissions — so a permission check tests the same thing more durably.
  *
  * @throws 401 when unauthenticated, 403 when no role matches.
  */

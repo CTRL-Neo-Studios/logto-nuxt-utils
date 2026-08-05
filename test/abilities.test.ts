@@ -99,15 +99,27 @@ describe('permission abilities', () => {
       expect((await run(ability, context({ roles: ['Student'] }))).authorized).toBe(false)
     })
 
-    it('denies a bearer caller, which never carries roles', async () => {
-      // Access tokens have no `roles` claim, so role abilities are unusable for
-      // service-to-service calls by design.
+    it('denies a bearer caller that carries no roles', async () => {
+      // Roles reach the app through the ID token, so an access token normally asserts
+      // permissions but not role names. This is the default Logto behaviour.
       const result = await run(
         defineRoleAbility('Admin'),
         context({ source: 'bearer', roles: [], scopes: ['a'] }),
       )
 
       expect(result.authorized).toBe(false)
+    })
+
+    it('honours roles on a bearer caller when the token does carry them', async () => {
+      // A Logto JWT customizer can add a `roles` claim to access tokens. Since the
+      // token is fully verified before its claims are read, discarding roles that are
+      // present would be wrong.
+      const result = await run(
+        defineRoleAbility('Admin'),
+        context({ source: 'bearer', roles: ['Admin'] }),
+      )
+
+      expect(result.authorized).toBe(true)
     })
   })
 

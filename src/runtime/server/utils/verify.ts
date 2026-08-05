@@ -3,10 +3,8 @@ import { createError, getRequestHeader } from 'h3'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import type { AuthContext } from '../../types'
 import {
+  contextFromAccessTokenClaims,
   createAnonymousContext,
-  parseOrganizationRoles,
-  parseScopeClaim,
-  toStringArray,
 } from '../../shared/core'
 import {
   useLogtoEndpoint,
@@ -47,18 +45,7 @@ function useLogtoOidcUris(event?: H3Event) {
 
 /** Maps a verified JWT payload onto the shared context shape. */
 function contextFromAccessTokenPayload(payload: JWTPayload): AuthContext {
-  return {
-    isAuthenticated: true,
-    source: 'bearer',
-    userId: payload.sub,
-    // Logto access tokens carry no `roles` claim; only ID tokens do. Bearer
-    // callers must therefore be authorized on permissions, not role names.
-    roles: [],
-    scopes: parseScopeClaim(payload.scope),
-    organizations: toStringArray(payload.organizations),
-    organizationRoles: parseOrganizationRoles(payload.organization_roles),
-    claims: payload as Record<string, unknown>,
-  }
+  return contextFromAccessTokenClaims(payload)
 }
 
 /**
@@ -71,7 +58,7 @@ function contextFromAccessTokenPayload(payload: JWTPayload): AuthContext {
  *
  * Verified here: signature against Logto's JWKS, `iss` matches this Logto
  * deployment, `aud` matches one of the resources this app **owns**, and `exp` /
- * `nbf` via `jose`.
+ * `nbf` via `jose`. Claims are only read after all of that has passed.
  *
  * Note the audience is drawn from the owned resources only, never from the full set
  * requested at sign-in. Accepting another service's resource as a valid audience

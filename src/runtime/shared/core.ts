@@ -126,3 +126,36 @@ export function ctxHasOrganizationRole(
   const held = ctx.organizationRoles[organizationId] ?? []
   return roles.some(role => held.includes(role))
 }
+
+/**
+ * Maps the claims of a **verified** access token onto the shared context shape.
+ *
+ * Kept here, with the other pure claim helpers, rather than beside the verifier: it
+ * is ordinary data normalisation and is far easier to test in isolation. It is
+ * deliberately not part of the module's auto-imports, which register only a named
+ * subset of this file.
+ *
+ * Takes a plain record rather than jose's `JWTPayload` so this file stays free of
+ * server-only dependencies; `JWTPayload` has a string index signature and so is
+ * assignable.
+ *
+ * Only call this once the token's signature, `iss`, `aud` and `exp` have been
+ * checked — nothing here validates anything.
+ */
+export function contextFromAccessTokenClaims(payload: Record<string, unknown>): AuthContext {
+  return {
+    isAuthenticated: true,
+    source: 'bearer',
+    userId: typeof payload.sub === 'string' ? payload.sub : undefined,
+    // Logto does not put roles in access tokens by default — `roles` is an ID-token
+    // claim — so this is normally empty and bearer callers must be authorized on
+    // permissions. It is read rather than hardcoded because a Logto JWT customizer
+    // can add a `roles` claim, and discarding one that is present in an
+    // already-verified token would be wrong.
+    roles: toStringArray(payload.roles),
+    scopes: parseScopeClaim(payload.scope),
+    organizations: toStringArray(payload.organizations),
+    organizationRoles: parseOrganizationRoles(payload.organization_roles),
+    claims: payload,
+  }
+}

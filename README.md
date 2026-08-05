@@ -13,6 +13,11 @@ context shape.
 | Permissions | the `scope` claim of a **resource-scoped access token**, never in the ID token or userinfo |
 | Org roles | the `organization_roles` claim, as `orgId:roleName` |
 
+A consequence worth internalising: a **session** caller (a browser) yields both roles
+and permissions, because the module reads the ID token *and* fetches the resource
+token. A **bearer** caller yields permissions only, since that single access token is
+all you get. Authorize on permissions and both work identically.
+
 ---
 
 ## Installation
@@ -318,10 +323,14 @@ Code alone is not enough:
   across them, fetched in parallel, and every token is cached in the encrypted session
   cookie keyed `"<sorted scopes>@<resource>"` — a long list can approach the ~4KB
   cookie limit, and a cold session needs one refresh-token exchange per resource.
-- **Prefer permissions over roles.** Access tokens carry no `roles` claim, so
-  `requireRole` and role abilities always reject a sibling service using a bearer
-  token. Logto role names are also mutable display strings that can be renamed in the
-  console.
+- **Prefer permissions over roles.** Roles reach your app through the **ID token**, so
+  a bearer caller (another service presenting an access token) normally carries none
+  and will fail `requireRole` and role abilities. Logto role names are also mutable
+  display strings that can be renamed in the console. Since a role in Logto is just a
+  bundle of permissions, a permission check tests the same thing more durably — and
+  works for both caller types. If you do need roles service-to-service, add a `roles`
+  claim to your access tokens with a Logto JWT customizer; the module honours it when
+  present.
 - **Roles and permissions are a snapshot** from token issue time (typically one hour).
   Use `refreshAuthContext()` to apply a role change immediately.
 - **Never trust `getAccessTokenClaims` for inbound tokens.** It is a base64 decode with

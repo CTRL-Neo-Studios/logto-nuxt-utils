@@ -112,10 +112,12 @@ export function defineAnyPermissionAbility(...permissions: Permission[]): Permis
 /**
  * An ability requiring at least one of the listed roles.
  *
- * Prefer permission-based abilities. Role names are only available to session
- * callers — access tokens carry no `roles` claim — so a role ability always denies a
- * sibling service authenticating with a bearer token. Logto role names are also
- * mutable display strings that can be renamed in the console.
+ * Prefer permission-based abilities. Roles reach this app through the ID token, so a
+ * bearer caller normally carries none and will be denied unless your access tokens
+ * include a `roles` claim via a Logto JWT customizer. Logto role names are also
+ * mutable display strings that can be renamed in the console, whereas a role is
+ * ultimately just a bundle of permissions — so checking permissions tests the same
+ * thing more durably.
  */
 export function defineRoleAbility(...roles: string[]): PermissionAbility {
   return defineContextAbility((user) => {
