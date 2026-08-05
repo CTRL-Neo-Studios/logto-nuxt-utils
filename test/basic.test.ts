@@ -108,4 +108,19 @@ describe('logto-nuxt-utils', async () => {
       expect(response.status).toBe(401)
     })
   })
+
+  describe('abilities', () => {
+    it('rejects an unauthenticated caller through an ability with 401, not 403', async () => {
+      // Proves the whole chain: gates auto-imported from shared/utils, the nitro
+      // plugin resolving the server user, and the ability reporting 401 rather than
+      // nuxt-authorization's default 403 for a guest.
+      const response = await fetch('/api/gated')
+      expect(response.status).toBe(401)
+    })
+
+    it('applies composed abilities over HTTP', async () => {
+      const response = await fetch('/api/gated-composed')
+      expect(response.status).toBe(401)
+    })
+  })
 })

@@ -52,4 +52,17 @@ describe('generated permission union', () => {
       expect(member.trim()).toMatch(/^"(?:[^"\\]|\\.)*"$/u)
     }
   })
+
+  it('also augments the module\'s own runtime types path', () => {
+    // Two specifiers are emitted on purpose. `nuxt-module-build --stub` makes
+    // auto-imports resolve to `src/runtime/**`, whose `Permission` comes from a
+    // different module than the published subpath resolves to; without the second
+    // augmentation, `Permission` silently widens back to `string` during development
+    // and permission typos stop being compile errors.
+    const declarations = contents.match(/declare module '[^']+'/gu) ?? []
+
+    expect(declarations).toHaveLength(2)
+    expect(declarations.some(d => d.includes('@type32/logto-nuxt-utils/types'))).toBe(true)
+    expect(declarations.some(d => /(?:src|dist)\/runtime\/types/u.test(d))).toBe(true)
+  })
 })

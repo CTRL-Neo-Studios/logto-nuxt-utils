@@ -1,3 +1,4 @@
+import { relative, resolve } from 'node:path'
 import {
   addImports,
   addPlugin,
@@ -316,6 +317,25 @@ export default defineNuxtModule<ModuleOptions>({
     addImports(sharedPredicates.map(name => ({ name, from: sharedCore })))
     addServerImports(sharedPredicates.map(name => ({ name, from: sharedCore })))
 
+    // Ability factories for `nuxt-authorization`. Registered in both contexts, since
+    // the same ability is evaluated by `<Can>` on the client and `authorize(event, …)`
+    // on the server. None of these names collide with the guards above or with
+    // `nuxt-authorization`'s own `defineAbility` / `allow` / `deny` / `allows` /
+    // `denies` / `authorize`.
+    const abilityFactories = [
+      'definePermissionGates',
+      'definePermissionAbility',
+      'defineAnyPermissionAbility',
+      'defineRoleAbility',
+      'defineOrganizationRoleAbility',
+      'anyOfAbilities',
+      'allOfAbilities',
+      'notAbility',
+    ]
+    const sharedAbilities = resolver.resolve('./runtime/shared/abilities')
+    addImports(abilityFactories.map(name => ({ name, from: sharedAbilities })))
+    addServerImports(abilityFactories.map(name => ({ name, from: sharedAbilities })))
+
     addServerPlugin(resolver.resolve('./runtime/server/plugins/authorization'))
 
     addServerHandler({
@@ -341,6 +361,14 @@ export default defineNuxtModule<ModuleOptions>({
      *
      * `Record<Union, true>` is a mapped type with statically known members, which an
      * interface may extend.
+     *
+     * The augmentation is emitted for two specifiers. The public subpath is what
+     * consumers resolve. The second, a relative path to this module's own runtime
+     * types, matters during module development: `nuxt-module-build --stub` makes
+     * auto-imports resolve to `src/runtime/**`, whose `Permission` comes from
+     * `src/runtime/types.ts` — a *different* module from the `dist` one the public
+     * subpath resolves to, which would silently widen `Permission` back to `string`
+     * in the playground.
      */
     addTypeTemplate({
       filename: 'types/logto-rbac.d.ts',
@@ -357,11 +385,27 @@ export default defineNuxtModule<ModuleOptions>({
         // quote or backslash cannot break out of the generated type.
         const union = permissions.map(permission => JSON.stringify(permission)).join(' | ')
 
+        const relativeRuntimeTypes = relative(
+          resolve(nuxt.options.buildDir, 'types'),
+          resolver.resolve('./runtime/types'),
+        )
+          .replace(/\\/gu, '/')
+          .replace(/\.(?:ts|mts|cts|js|mjs|cjs|d\.ts)$/u, '')
+
+        const specifiers = unique([
+          `${PACKAGE_NAME}/types`,
+          relativeRuntimeTypes.startsWith('.')
+            ? relativeRuntimeTypes
+            : `./${relativeRuntimeTypes}`,
+        ])
+
         return [
-          `declare module '${PACKAGE_NAME}/types' {`,
-          `  interface RbacPermissionMap extends Record<${union}, true> {}`,
-          `}`,
-          '',
+          ...specifiers.flatMap(specifier => [
+            `declare module '${specifier}' {`,
+            `  interface RbacPermissionMap extends Record<${union}, true> {}`,
+            `}`,
+            '',
+          ]),
           'export {}',
           '',
         ].join('\n')
