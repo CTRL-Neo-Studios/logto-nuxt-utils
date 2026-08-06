@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
 import type { AuthContext } from '../../types'
+import { describeLogtoOidcError, formatLogtoOidcError } from '../../shared/diagnostics'
 import { useAuthContext } from '../utils/verify'
 
 /** The contract `nuxt-authorization`'s server bouncer reads off the event context. */
@@ -17,7 +18,8 @@ interface AuthorizationEventContext {
  */
 interface NitroAppLike {
   hooks: {
-    hook: (event: 'request', callback: (event: H3Event) => void) => void
+    hook: ((event: 'request', callback: (event: H3Event) => void) => void)
+      & ((event: 'error', callback: (error: unknown) => void) => void)
   }
 }
 
@@ -66,5 +68,21 @@ export default (nitro: NitroAppLike) => {
     ;(event.context as Record<string, unknown>).$authorization = {
       resolveServerUser: () => resolveServerUser(event),
     } satisfies AuthorizationEventContext
+  })
+
+  /**
+   * Explains Logto's OIDC errors instead of letting them surface as bare codes.
+   *
+   * The sign-in callback is handled by `@logto/nuxt`'s own route, so a
+   * misconfiguration here throws from inside that handler with no reference to the
+   * config that caused it — `invalid_target` in particular reads as "resource
+   * indicator is missing, or unknown", which gives no clue that it means an entry in
+   * `logtoRbac.resources` is not registered in Logto.
+   *
+   * This only logs; the response is left entirely to Nitro.
+   */
+  nitro.hooks.hook('error', (error) => {
+    const info = describeLogtoOidcError(error)
+    if (info) console.error(`[logto-rbac] ${formatLogtoOidcError(info)}\n`)
   })
 }

@@ -78,10 +78,11 @@ export async function useLogtoAccessToken(
 ): Promise<string | undefined> {
   if (!useRequestedResources(event).includes(resource)) {
     throw createError({
-      statusCode: 500,
-      statusMessage: `"${resource}" is not a configured resource. Add it to \`resources\` `
-        + 'or `additionalResources` in rbac.config.ts, then sign in again so the refresh '
-        + 'token is granted access to it.',
+      status: 500,
+      statusText: 'Internal Server Error',
+      message: `"${resource}" is not a configured resource. Add it to `
+        + '`logtoRbac.resources` or `logtoRbac.additionalResources`, then sign in again '
+        + 'so the refresh token is granted access to it.',
     })
   }
 

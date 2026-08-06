@@ -18,13 +18,26 @@ export default defineNuxtConfig({
     pathnames: {
       signIn: '/signin',
       signOut: '/signout',
-      callback: '/api/auth/callback',
+      callback: '/api/v1/auth/callback',
     },
     postCallbackRedirectUri: '/',
   },
 
   logtoRbac: {
-    resources: ['https://playground.example.com/api/v1'],
+    /**
+     * Must be an API resource that actually exists in your Logto console.
+     *
+     * Logto validates this as an RFC 8707 `resource` parameter on the authorization
+     * request, so an unregistered indicator fails sign-in with
+     * `invalid_target: resource indicator is missing, or unknown`.
+     */
+    resources: [
+      process.env.NUXT_LOGTO_API_RESOURCE || 'https://playground.example.com/api/v1',
+    ],
+    /**
+     * Each of these must exist as a permission on the resource above, otherwise Logto
+     * rejects the request with `invalid_scope`.
+     */
     permissions: [...PERMISSIONS],
   },
 })

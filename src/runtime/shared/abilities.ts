@@ -8,11 +8,11 @@ import {
 } from 'nuxt-authorization/utils'
 import type { AuthContext, Permission } from '../types'
 import {
-  ctxHasAny,
-  ctxHasOrganizationRole,
-  ctxHasRole,
-  ctxMissingPermissions,
-} from './core'
+  type AuthRequirements,
+  type RequirementsInput,
+  checkRequirements,
+  toRequirements,
+} from './requirements'
 
 /**
  * Permission-backed abilities for `nuxt-authorization`.
@@ -64,13 +64,24 @@ function defineContextAbility(authorizer: ContextAuthorizer): PermissionAbility 
   ) as unknown as PermissionAbility
 }
 
-/** 401 rather than 403, so a client can tell "sign in" from "you may not". */
-function denyUnauthenticated(): AuthorizationResponse {
-  return deny({ statusCode: 401, message: 'Authentication required.' })
-}
-
 function denyForbidden(message: string): AuthorizationResponse {
   return deny({ statusCode: 403, message })
+}
+
+/**
+ * The single ability builder: turns declarative requirements into an ability.
+ *
+ * Delegates to the same `checkRequirements` the server guards use, so a rule behaves
+ * identically whether it is enforced by `requireUser` in a route or by `<Can>` in a
+ * template — including the 401-versus-403 distinction.
+ */
+export function defineRequirementsAbility(requirements: AuthRequirements): PermissionAbility {
+  return defineContextAbility((user) => {
+    const result = checkRequirements(user, requirements)
+    if (result.ok) return allow()
+
+    return deny({ statusCode: result.statusCode, message: result.message })
+  })
 }
 
 /**
@@ -82,31 +93,12 @@ function denyForbidden(message: string): AuthorizationResponse {
  * ```
  */
 export function definePermissionAbility(...permissions: Permission[]): PermissionAbility {
-  return defineContextAbility((user) => {
-    if (!user?.isAuthenticated) return denyUnauthenticated()
-
-    const missing = ctxMissingPermissions(user, ...permissions)
-    if (missing.length > 0) {
-      return denyForbidden(`Missing required permission(s): ${missing.join(', ')}.`)
-    }
-
-    return allow()
-  })
+  return defineRequirementsAbility({ permissions })
 }
 
 /** An ability requiring **at least one** of the listed permissions. */
 export function defineAnyPermissionAbility(...permissions: Permission[]): PermissionAbility {
-  return defineContextAbility((user) => {
-    if (!user?.isAuthenticated) return denyUnauthenticated()
-
-    if (!ctxHasAny(user, ...permissions)) {
-      return denyForbidden(
-        `Requires one of the following permission(s): ${permissions.join(', ')}.`,
-      )
-    }
-
-    return allow()
-  })
+  return defineRequirementsAbility({ anyPermission: permissions })
 }
 
 /**
@@ -120,15 +112,7 @@ export function defineAnyPermissionAbility(...permissions: Permission[]): Permis
  * thing more durably.
  */
 export function defineRoleAbility(...roles: string[]): PermissionAbility {
-  return defineContextAbility((user) => {
-    if (!user?.isAuthenticated) return denyUnauthenticated()
-
-    if (!ctxHasRole(user, ...roles)) {
-      return denyForbidden(`Requires one of the following role(s): ${roles.join(', ')}.`)
-    }
-
-    return allow()
-  })
+  return defineRequirementsAbility({ roles })
 }
 
 /** An ability requiring one of `roles` within a specific organization. */
@@ -136,63 +120,27 @@ export function defineOrganizationRoleAbility(
   organizationId: string,
   ...roles: string[]
 ): PermissionAbility {
-  return defineContextAbility((user) => {
-    if (!user?.isAuthenticated) return denyUnauthenticated()
-
-    if (!ctxHasOrganizationRole(user, organizationId, ...roles)) {
-      return denyForbidden(
-        `Requires one of the following role(s) in organization ${organizationId}: `
-        + `${roles.join(', ')}.`,
-      )
-    }
-
-    return allow()
-  })
+  return defineRequirementsAbility({ organization: { id: organizationId, roles } })
 }
 
 /**
  * How a single entry of {@link definePermissionGates} may be written.
  *
  * A bare permission or an array of them is the common case and means *all* of them;
- * anything else is spelled out explicitly.
+ * anything else is a full {@link AuthRequirements} object, the same vocabulary used by
+ * `requireUser` and by the client composable.
  */
-export type GateSpec =
-  | Permission
-  | readonly Permission[]
-  /** Requires every listed permission. */
-  | { readonly all: readonly Permission[] }
-  /** Requires at least one listed permission. */
-  | { readonly any: readonly Permission[] }
-  /** Requires at least one listed role. */
-  | { readonly roles: readonly string[] }
-  /** Requires at least one listed role within the given organization. */
-  | { readonly organizationId: string, readonly roles: readonly string[] }
+export type GateSpec = RequirementsInput
 
 function abilityFromSpec(spec: GateSpec): PermissionAbility {
-  if (typeof spec === 'string') return definePermissionAbility(spec)
-
-  if (Array.isArray(spec)) {
-    return definePermissionAbility(...(spec as readonly Permission[]))
-  }
-
-  // Checked before the plain `roles` form, since that shape is a subset of this one.
-  if ('organizationId' in spec) {
-    return defineOrganizationRoleAbility(spec.organizationId, ...spec.roles)
-  }
-  if ('roles' in spec) return defineRoleAbility(...spec.roles)
-  if ('any' in spec) return defineAnyPermissionAbility(...spec.any)
-  if ('all' in spec) return definePermissionAbility(...spec.all)
-
-  // Unreachable for well-typed input, but an unrecognised shape must fail closed
-  // rather than silently authorize everyone.
-  return defineContextAbility(() => denyForbidden('Malformed permission gate.'))
+  return defineRequirementsAbility(toRequirements(spec))
 }
 
 /**
  * Declares a named set of permission gates in one place.
  *
- * Keys are preserved in the return type, so `gates.viewAssessment` autocompletes,
- * and permission strings are checked against the `Permission` union generated from
+ * Keys are preserved in the return type, so `gates.viewAssessment` autocompletes, and
+ * permission strings are checked against the `Permission` union generated from
  * `logtoRbac.permissions` — a typo is a compile error rather than a silent deny.
  *
  * @example
@@ -201,7 +149,8 @@ function abilityFromSpec(spec: GateSpec): PermissionAbility {
  * export const gates = definePermissionGates({
  *   viewAssessment: 'assessment:view',
  *   manageAssessment: ['assessment:edit', 'assessment:delete'],
- *   reviewAssessment: { any: ['assessment:edit', 'assessment:share'] },
+ *   reviewAssessment: { anyPermission: ['assessment:edit', 'assessment:share'] },
+ *   verifiedEditor: { permissions: ['assessment:edit'], verified: true },
  *   admin: { roles: ['Admin'] },
  * })
  * ```

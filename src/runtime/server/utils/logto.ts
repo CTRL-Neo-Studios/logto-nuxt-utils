@@ -54,8 +54,9 @@ export async function useServerLogtoClient(event: H3Event): Promise<ServerLogtoC
   const client = event.context.logtoClient
   if (!client) {
     throw createError({
-      statusCode: 500,
-      statusMessage: 'Logto client unavailable. This route is handled directly by Logto '
+      status: 500,
+      statusText: 'Internal Server Error',
+      message: 'Logto client unavailable. This route is handled directly by Logto '
         + '(sign-in, sign-out or callback), so it has no request context.',
     })
   }

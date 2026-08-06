@@ -10,7 +10,8 @@ export const gates = definePermissionGates({
   viewAssessment: 'assessment:view',
   listAssessments: 'assessment:list',
   manageAssessment: ['assessment:edit', 'assessment:delete'],
-  reviewAssessment: { any: ['assessment:edit', 'assessment:share'] },
+  reviewAssessment: { anyPermission: ['assessment:edit', 'assessment:share'] },
+  verifiedEditor: { permissions: ['assessment:edit'], verified: true },
   admin: { roles: ['Admin'] },
 })
 

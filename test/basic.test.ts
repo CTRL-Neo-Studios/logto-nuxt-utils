@@ -123,4 +123,20 @@ describe('logto-nuxt-utils', async () => {
       expect(response.status).toBe(401)
     })
   })
+
+  describe('declarative requirements', () => {
+    it('rejects an unauthenticated caller with 401', async () => {
+      const response = await fetch('/api/required')
+      expect(response.status).toBe(401)
+    })
+
+    it('reports which requirement failed', async () => {
+      // The machine-readable payload is what lets a client distinguish "sign in" from
+      // "you are missing assessment:view".
+      const response = await fetch('/api/required')
+      const body = await response.json() as { data?: { failed?: string } }
+
+      expect(body.data?.failed).toBe('unauthenticated')
+    })
+  })
 })

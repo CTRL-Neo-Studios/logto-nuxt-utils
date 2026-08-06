@@ -140,6 +140,14 @@ const BASE_USER_SCOPES = ['roles', 'email', 'profile'] as const
 const PACKAGE_NAME = '@type32/logto-nuxt-utils'
 
 /**
+ * Markers of a resource indicator that was never filled in.
+ *
+ * Deliberately narrow: these are strings nobody uses for a real Logto API resource,
+ * so matching one is a near-certain misconfiguration rather than a style preference.
+ */
+const PLACEHOLDER_PATTERN = /example\.(?:com|org|net)|replace-?me|your-?(?:app|domain|tenant)/iu
+
+/**
  * The slice of `runtimeConfig.logto` this module writes to.
  *
  * Declared locally because the type Nuxt generates for that key is derived from
@@ -150,6 +158,7 @@ interface MutableLogtoRuntimeConfig {
   scopes?: string[]
   resources?: string[]
   fetchUserInfo?: boolean
+  pathnames?: { signIn?: string }
 }
 
 function unique(values: Iterable<string>): string[] {
@@ -207,6 +216,19 @@ export default defineNuxtModule<ModuleOptions>({
             `The API resource "${resource}" ends with a trailing slash. Logto treats that `
             + 'as a different resource, which shows up as an empty `scope` claim. Remove it '
             + 'unless the Logto console really is configured with the slash.',
+          )
+        }
+
+        // Every resource is sent as an RFC 8707 `resource` parameter and validated by
+        // Logto against its registered API resources. An unregistered one fails the
+        // entire authorization request with `invalid_target`, and that surfaces at the
+        // sign-in callback far from this config — so catch a leftover placeholder now.
+        if (PLACEHOLDER_PATTERN.test(resource)) {
+          logger.warn(
+            `The API resource "${resource}" looks like a placeholder. Logto rejects any `
+            + 'resource not registered in its console with "invalid_target: resource '
+            + 'indicator is missing, or unknown", which appears at the sign-in callback '
+            + 'rather than here.',
           )
         }
       }
@@ -278,6 +300,12 @@ export default defineNuxtModule<ModuleOptions>({
         ...ownedResources,
         ...additionalResourceIndicators,
       ])
+
+      // Mirrored into public config so client-side guards can send an unauthenticated
+      // visitor to sign in. The Logto pathnames themselves live in private runtime
+      // config, so the browser has no other way to discover it.
+      nuxt.options.runtimeConfig.public.logtoRbac.signInPath
+        = logto.pathnames?.signIn ?? '/sign-in'
     })
 
     /**
@@ -290,8 +318,13 @@ export default defineNuxtModule<ModuleOptions>({
      */
     nuxt.options.runtimeConfig.logtoRbac = { resources: ownedResources }
 
-    // Exposed publicly so the client plugin knows where to resolve the session.
-    nuxt.options.runtimeConfig.public.logtoRbac = { sessionEndpoint }
+    // Exposed publicly so the client plugin knows where to resolve the session, and so
+    // client-side guards can redirect to sign-in. `signInPath` is filled in during
+    // `modules:done`, once @logto/nuxt has resolved its own defaults.
+    nuxt.options.runtimeConfig.public.logtoRbac = {
+      sessionEndpoint,
+      signInPath: '/sign-in',
+    }
 
     // -------------------------------------------------------------- wiring
 
@@ -317,6 +350,17 @@ export default defineNuxtModule<ModuleOptions>({
     addImports(sharedPredicates.map(name => ({ name, from: sharedCore })))
     addServerImports(sharedPredicates.map(name => ({ name, from: sharedCore })))
 
+    // The declarative requirements vocabulary, shared by guards, gates and the client.
+    const requirementHelpers = [
+      'checkRequirements',
+      'ctxSatisfies',
+      'ctxIsVerified',
+      'toRequirements',
+    ]
+    const sharedRequirements = resolver.resolve('./runtime/shared/requirements')
+    addImports(requirementHelpers.map(name => ({ name, from: sharedRequirements })))
+    addServerImports(requirementHelpers.map(name => ({ name, from: sharedRequirements })))
+
     // Ability factories for `nuxt-authorization`. Registered in both contexts, since
     // the same ability is evaluated by `<Can>` on the client and `authorize(event, …)`
     // on the server. None of these names collide with the guards above or with
@@ -326,6 +370,7 @@ export default defineNuxtModule<ModuleOptions>({
       'definePermissionGates',
       'definePermissionAbility',
       'defineAnyPermissionAbility',
+      'defineRequirementsAbility',
       'defineRoleAbility',
       'defineOrganizationRoleAbility',
       'anyOfAbilities',
@@ -335,6 +380,18 @@ export default defineNuxtModule<ModuleOptions>({
     const sharedAbilities = resolver.resolve('./runtime/shared/abilities')
     addImports(abilityFactories.map(name => ({ name, from: sharedAbilities })))
     addServerImports(abilityFactories.map(name => ({ name, from: sharedAbilities })))
+
+    // Client-only: reactive permission state and the route-guard factory.
+    addImports([
+      {
+        name: 'useAuthorization',
+        from: resolver.resolve('./runtime/app/composables/useAuthorization'),
+      },
+      {
+        name: 'defineAuthMiddleware',
+        from: resolver.resolve('./runtime/app/utils/auth-middleware'),
+      },
+    ])
 
     addServerPlugin(resolver.resolve('./runtime/server/plugins/authorization'))
 
@@ -465,6 +522,8 @@ declare module '@nuxt/schema' {
     logtoRbac: {
       /** Route the session endpoint is mounted at. */
       sessionEndpoint: string
+      /** Logto sign-in path, mirrored from private config for client-side guards. */
+      signInPath: string
     }
   }
 }

@@ -96,34 +96,106 @@ app append its own. Duplicates are de-duplicated by the module.
 
 ## Guarding server routes
 
-Guards are auto-imported. They resolve the caller once per request and throw H3
-errors carrying machine-readable `data`.
+One guard covers everything, so a route handler never contains a hand-written
+`if (!user) throw ...` clause:
 
 ```ts
 // server/api/assessments/index.get.ts
 export default defineEventHandler(async (event) => {
-  const ctx = await requirePermission(event, 'assessment:list')
+  const ctx = await requireUser(event, { permissions: ['assessment:list'] })
   return listAssessmentsFor(ctx.userId)
 })
 ```
 
+`requireUser(event)` with no second argument is a plain authentication check.
+Otherwise it takes **requirements**:
+
+```ts
+interface AuthRequirements {
+  permissions?: Permission[]      // all of these        ← the primary mechanism
+  anyPermission?: Permission[]    // at least one
+  roles?: string[]                // exact match, any of  (secondary)
+  organization?: { id: string, roles?: string[] }
+  verified?: boolean              // default false
+}
+```
+
+Requirements are checked permissions-first, then roles, then organization, then
+verification, so the reported failure is the most actionable one.
+
 | Guard | Behaviour |
 | --- | --- |
-| `requireUser(event)` | 401 if not authenticated |
-| `requirePermission(event, …perms)` | 401, else 403 unless **all** are held |
-| `requireAnyPermission(event, …perms)` | 401, else 403 unless **one** is held |
-| `requireRole(event, …roles)` | 401, else 403 unless one role matches |
-| `hasPermission(event, …perms)` | non-throwing boolean, for branching |
+| `requireUser(event, reqs?)` | 401 if not authenticated, 403 if a requirement is unmet |
+| `requirePermission(event, …perms)` | sugar for `{ permissions }` |
+| `requireAnyPermission(event, …perms)` | sugar for `{ anyPermission }` |
+| `requireRole(event, …roles)` | sugar for `{ roles }` |
+| `meetsRequirements(event, reqs?)` | non-throwing boolean |
+| `hasPermission(event, …perms)` | non-throwing boolean |
 
-403 responses include `data: { required, missing }` so a client can see *which*
-permission was missing.
+Every one of these funnels through the same `checkRequirements`, so authorization is
+decided in exactly one place — the same place the client and the abilities use.
+
+Failures carry a machine-readable payload:
+
+```json
+{ "statusCode": 403, "data": { "failed": "permissions",
+  "required": ["assessment:edit"], "held": ["assessment:view"] } }
+```
+
+`failed` is one of `unauthenticated` · `permissions` · `anyPermission` · `roles` ·
+`organization` · `verified`, so a client can distinguish "sign in" from "you are
+missing `assessment:edit`".
+
+---
+
+## On the client
+
+`useAuthorization()` resolves the same context and applies the same checks, so the UI
+cannot disagree with the route that enforces it:
+
+```vue
+<script setup lang="ts">
+const auth = useAuthorization()
+await auth.resolve()
+
+const canEdit = computed(() => auth.can('assessment:edit'))
+const canReview = computed(() => auth.canAny('assessment:edit', 'assessment:share'))
+const isVerifiedEditor = computed(() =>
+  auth.satisfies({ permissions: ['assessment:edit'], verified: true }),
+)
+</script>
+```
+
+| Member | Purpose |
+| --- | --- |
+| `can(…perms)` | every listed permission is held — the common case |
+| `canAny(…perms)` | at least one is held |
+| `hasRole(…roles)` | exact role match |
+| `satisfies(reqs)` | the full declarative check |
+| `user` / `isAuthenticated` / `scopes` / `roles` | reactive state |
+| `resolve()` / `refresh()` | ensure fetched / refetch |
+
+Because these read a ref, calling them inside `computed()` is reactive.
+
+### Route guards
+
+```ts
+// app/middleware/assessment-editor.ts
+export default defineAuthMiddleware({ permissions: ['assessment:edit'] })
+```
+
+Unauthenticated visitors are redirected to your Logto sign-in path; authenticated but
+unauthorised ones get a 403. Pass `redirectTo` to override the destination, or
+`redirectUnauthenticated: false` to make a missing session a 401 like any other
+failure. Skipped during prerendering, since a prerendered page has no request-bound
+user and gating it would bake one visitor's verdict into shared HTML.
 
 ---
 
 ## Abilities
 
-Guards are convenient in a route handler, but they cannot drive a template. Abilities
-give you one object usable in both places, via `nuxt-authorization`.
+Guards work in a route handler but cannot drive a template. Abilities give you one
+object usable in both, via `nuxt-authorization`.
 
 Declare them in **`shared/utils/`**, which Nuxt auto-imports into the app *and* the
 server. Files at the `shared/` root are not auto-imported — those need `#shared/…`.
@@ -133,15 +205,15 @@ server. Files at the `shared/` root are not auto-imported — those need `#share
 export const gates = definePermissionGates({
   viewAssessment: 'assessment:view',                            // a single permission
   manageAssessment: ['assessment:edit', 'assessment:delete'],   // ALL of them
-  reviewAssessment: { any: ['assessment:edit', 'assessment:share'] },
-  auditAssessment: { all: ['assessment:view', 'assessment:list'] },
+  reviewAssessment: { anyPermission: ['assessment:edit', 'assessment:share'] },
+  verifiedEditor: { permissions: ['assessment:edit'], verified: true },
   admin: { roles: ['Admin'] },
-  orgOwner: { organizationId: 'org_123', roles: ['owner'] },
 })
 ```
 
-A bare string or array is shorthand for "all of these permissions"; anything else is
-spelled out. Keys are preserved, so `gates.viewAssessment` autocompletes.
+Entries take the **same `AuthRequirements` vocabulary** as the guards, with a bare
+string or array as shorthand for "all of these permissions". Keys are preserved, so
+`gates.viewAssessment` autocompletes.
 
 ### In routes
 
@@ -181,6 +253,10 @@ For one-offs, without the map:
 ```ts
 export const canView = definePermissionAbility('assessment:view')
 export const canReview = defineAnyPermissionAbility('assessment:edit', 'assessment:share')
+export const verifiedEditor = defineRequirementsAbility({
+  permissions: ['assessment:edit'],
+  verified: true,
+})
 export const isAdmin = defineRoleAbility('Admin')
 export const isOrgOwner = defineOrganizationRoleAbility('org_123', 'owner')
 ```
@@ -217,18 +293,9 @@ never authorize.
 ### 401 versus 403
 
 Gates report **401** when nobody is signed in and **403** when a user is signed in but
-lacks the permission, matching the guards. `nuxt-authorization` would otherwise
-flatten both into a 403, which makes it impossible for a client to decide between
-"redirect to sign-in" and "show a forbidden message".
-
----
-
-## Client-side state
-
-The browser cannot read its own permissions — they live in an access token inside an
-httpOnly cookie — so the module exposes a session endpoint (`/api/_auth/session` by
-default) and wires `nuxt-authorization`'s `resolveClientUser` to it. `<Can>` and
-`<Bouncer>` therefore work with no extra setup.
+unauthorised, matching the guards. `nuxt-authorization` would otherwise flatten both
+into a 403, making it impossible for a client to choose between "redirect to sign-in"
+and "show a forbidden message".
 
 ---
 
@@ -283,6 +350,8 @@ of bug by construction.
 | `useOwnedResources(event?)` | resources this app owns, i.e. the accepted audiences |
 | `useServerLogtoUserInfo(event)` | on-demand `custom_data` / `identities` fetch |
 | `useServerLogtoUser(event)` | ID-token claims, free from the session cookie |
+| `checkRequirements(ctx, reqs)` | pure check returning *why* it failed |
+| `ctxSatisfies(ctx, reqs)` | pure boolean form, null-safe |
 
 `AuthContext` is the normalised shape both sides share:
 
@@ -310,6 +379,26 @@ Code alone is not enough:
 4. **Sign in again.** Scopes are granted to the refresh token at sign-in and cannot be
    added afterwards, so existing sessions will never see new permissions.
 
+### Sign-in fails with `invalid_target`
+
+```
+error=invalid_target&error_description=resource+indicator+is+missing%2C+or+unknown
+```
+
+An entry in `resources` or `additionalResources` is **not registered in Logto**. Every
+resource is sent as an RFC 8707 `resource` parameter and validated by Logto's
+authorization endpoint, so an unknown indicator fails the whole sign-in — and it
+surfaces at the callback, far from the config that caused it.
+
+Check for a leftover placeholder, a typo, or a trailing slash. The module warns at
+build time when a resource looks like a placeholder, and explains this error in the
+server log if it does occur.
+
+### Sign-in fails with `invalid_scope`
+
+A permission in `logtoRbac.permissions` does not exist on the resource it belongs to.
+Add it in the Logto console, or remove it from the config.
+
 ---
 
 ## Things that will bite you
@@ -317,6 +406,8 @@ Code alone is not enough:
 - **A trailing slash on a resource makes it a different resource to Logto**, which
   surfaces as a silently empty `scope` claim rather than an error. The module warns
   about this at build time.
+- **Every resource must exist in the Logto console.** An unregistered indicator fails
+  sign-in outright with `invalid_target`; see above.
 - **Put other services' resources in `additionalResources`, not `resources`.**
   Everything in `resources` is an accepted inbound audience.
 - **Multiple owned resources cost one access token each.** Permissions are the union
@@ -325,12 +416,14 @@ Code alone is not enough:
   cookie limit, and a cold session needs one refresh-token exchange per resource.
 - **Prefer permissions over roles.** Roles reach your app through the **ID token**, so
   a bearer caller (another service presenting an access token) normally carries none
-  and will fail `requireRole` and role abilities. Logto role names are also mutable
-  display strings that can be renamed in the console. Since a role in Logto is just a
-  bundle of permissions, a permission check tests the same thing more durably — and
-  works for both caller types. If you do need roles service-to-service, add a `roles`
-  claim to your access tokens with a Logto JWT customizer; the module honours it when
-  present.
+  and will fail `roles` requirements. Logto role names are also mutable display
+  strings that can be renamed in the console. Since a role in Logto is just a bundle
+  of permissions, a permission check tests the same thing more durably — and works for
+  both caller types. If you do need roles service-to-service, add a `roles` claim to
+  your access tokens with a Logto JWT customizer; the module honours it when present.
+- **`verified` will not reject a bearer caller.** `email_verified` is an ID-token
+  claim, and an absent claim counts as verified rather than unverified — otherwise the
+  requirement would lock out every service-to-service call.
 - **Roles and permissions are a snapshot** from token issue time (typically one hour).
   Use `refreshAuthContext()` to apply a role change immediately.
 - **Never trust `getAccessTokenClaims` for inbound tokens.** It is a base64 decode with

@@ -128,10 +128,16 @@ describe('permission abilities', () => {
       const ability = defineOrganizationRoleAbility('org_1', 'owner')
 
       expect(
-        (await run(ability, context({ organizationRoles: { org_1: ['owner'] } }))).authorized,
+        (await run(ability, context({
+          organizations: ['org_1'],
+          organizationRoles: { org_1: ['owner'] },
+        }))).authorized,
       ).toBe(true)
       expect(
-        (await run(ability, context({ organizationRoles: { org_2: ['owner'] } }))).authorized,
+        (await run(ability, context({
+          organizations: ['org_2'],
+          organizationRoles: { org_2: ['owner'] },
+        }))).authorized,
       ).toBe(false)
     })
   })
@@ -140,10 +146,11 @@ describe('permission abilities', () => {
     const gates = definePermissionGates({
       single: 'a',
       allShorthand: ['a', 'b'],
-      allExplicit: { all: ['a', 'b'] },
-      anyExplicit: { any: ['a', 'b'] },
+      allExplicit: { permissions: ['a', 'b'] },
+      anyExplicit: { anyPermission: ['a', 'b'] },
       byRole: { roles: ['Admin'] },
-      byOrgRole: { organizationId: 'org_1', roles: ['owner'] },
+      byOrgRole: { organization: { id: 'org_1', roles: ['owner'] } },
+      verifiedOnly: { permissions: ['a'], verified: true },
     })
 
     it('treats a bare string as a single permission', async () => {
@@ -155,23 +162,34 @@ describe('permission abilities', () => {
       expect((await run(gates.allShorthand, context({ scopes: ['a', 'b'] }))).authorized).toBe(true)
     })
 
-    it('supports the explicit all / any forms', async () => {
+    it('supports the explicit permissions / anyPermission forms', async () => {
       expect((await run(gates.allExplicit, context({ scopes: ['a'] }))).authorized).toBe(false)
       expect((await run(gates.anyExplicit, context({ scopes: ['a'] }))).authorized).toBe(true)
     })
 
-    it('supports role and organization-role forms', async () => {
+    it('supports role and organization forms', async () => {
       expect((await run(gates.byRole, context({ roles: ['Admin'] }))).authorized).toBe(true)
-      expect(
-        (await run(gates.byOrgRole, context({ organizationRoles: { org_1: ['owner'] } }))).authorized,
-      ).toBe(true)
+      expect((await run(gates.byOrgRole, context({
+        organizations: ['org_1'],
+        organizationRoles: { org_1: ['owner'] },
+      }))).authorized).toBe(true)
     })
 
-    it('prefers the organization form when both keys are present', async () => {
-      // `{ roles }` is a structural subset of `{ organizationId, roles }`, so order of
-      // checks matters; a plain role match must not satisfy an organization gate.
+    it('does not let a plain role satisfy an organization gate', async () => {
       const result = await run(gates.byOrgRole, context({ roles: ['owner'] }))
       expect(result.authorized).toBe(false)
+    })
+
+    it('combines permission and verification requirements', async () => {
+      expect((await run(gates.verifiedOnly, context({
+        scopes: ['a'],
+        claims: { email_verified: true },
+      }))).authorized).toBe(true)
+
+      expect((await run(gates.verifiedOnly, context({
+        scopes: ['a'],
+        claims: { email_verified: false },
+      }))).authorized).toBe(false)
     })
   })
 

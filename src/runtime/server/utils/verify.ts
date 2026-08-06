@@ -1,5 +1,5 @@
 import type { H3Event } from 'h3'
-import { createError, getRequestHeader } from 'h3'
+import { createError, getRequestHeader, isError } from 'h3'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import type { AuthContext } from '../../types'
 import {
@@ -77,9 +77,10 @@ export async function verifyAccessToken(
 
   if (audience.length === 0) {
     throw createError({
-      statusCode: 500,
-      statusMessage: 'Cannot verify bearer tokens without a configured API resource. '
-        + 'Check that rbac.config.ts sets `resources`.',
+      status: 500,
+      statusText: 'Internal Server Error',
+      message: 'Cannot verify bearer tokens without a configured API resource. '
+        + 'Check that `logtoRbac.resources` is set in nuxt.config.',
     })
   }
 
@@ -113,11 +114,12 @@ export async function useBearerAuthContext(event: H3Event): Promise<AuthContext 
     return await verifyAccessToken(token, event)
   }
   catch (error) {
-    if (error && typeof error === 'object' && 'statusCode' in error) throw error
+    if (isError(error)) throw error
 
     throw createError({
-      statusCode: 401,
-      statusMessage: 'Invalid or expired access token.',
+      status: 401,
+      statusText: 'Unauthorized',
+      message: 'Invalid or expired access token.',
       data: { reason: error instanceof Error ? error.message : String(error) },
     })
   }
