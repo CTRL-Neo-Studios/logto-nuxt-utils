@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.5
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.4...v0.1.5)
+
+### 🚀 Enhancements
+
+- **auth:** Composables & tests ([636934c](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/636934c))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.4
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.3...v0.1.4)
