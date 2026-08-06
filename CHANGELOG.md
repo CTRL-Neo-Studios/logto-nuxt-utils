@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.4
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.3...v0.1.4)
+
+### 🚀 Enhancements
+
+- **utils:** Added require utils for simpler perm/auth gating ([d646009](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/d646009))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.3
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.2...v0.1.3)
