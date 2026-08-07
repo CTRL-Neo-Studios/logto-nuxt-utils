@@ -31,8 +31,11 @@ export default defineNuxtConfig({
      * request, so an unregistered indicator fails sign-in with
      * `invalid_target: resource indicator is missing, or unknown`.
      */
+    // Non-null asserted rather than defaulted: a placeholder here fails at the
+    // sign-in callback with `invalid_target`, far from the cause, so an absent
+    // env var should be obvious immediately instead of being papered over.
     resources: [
-      process.env.NUXT_LOGTO_API_RESOURCE,
+      process.env.NUXT_LOGTO_API_RESOURCE!,
     ],
     /**
      * Each of these must exist as a permission on the resource above, otherwise Logto

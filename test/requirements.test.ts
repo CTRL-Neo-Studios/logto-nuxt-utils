@@ -138,9 +138,15 @@ describe('checkRequirements', () => {
   })
 
   describe('verified', () => {
-    it('is not required by default', () => {
+    it('is required by default, so omitting it fails closed', () => {
       const ctx = context({ claims: { email_verified: false } })
-      expect(checkRequirements(ctx, { permissions: [] }).ok).toBe(true)
+      expect(checkRequirements(ctx, { permissions: [] }))
+        .toMatchObject({ failed: 'verified', statusCode: 403 })
+    })
+
+    it('rejects an explicitly unverified caller even with no requirements at all', () => {
+      expect(checkRequirements(context({ claims: { email_verified: false } })))
+        .toMatchObject({ failed: 'verified', statusCode: 403 })
     })
 
     it('rejects an explicitly unverified caller when required', () => {
@@ -152,11 +158,22 @@ describe('checkRequirements', () => {
       expect(result).toMatchObject({ failed: 'verified', statusCode: 403 })
     })
 
+    it('admits an unverified caller only on an explicit opt-out', () => {
+      // The escape hatch has to be deliberate: `verified: false` is the one way to
+      // serve a caller Logto reports as unverified.
+      expect(checkRequirements(
+        context({ claims: { email_verified: false } }),
+        { verified: false },
+      ).ok).toBe(true)
+    })
+
     it('passes when the claim is absent, rather than locking the caller out', () => {
       // `email_verified` is an ID-token claim, so a bearer caller has none. Treating
-      // absence as unverified would reject every service-to-service call.
+      // absence as unverified would reject every service-to-service call — which is
+      // precisely what makes requiring verification by default safe.
       expect(checkRequirements(context(), { verified: true }).ok).toBe(true)
       expect(checkRequirements(context({ source: 'bearer' }), { verified: true }).ok).toBe(true)
+      expect(checkRequirements(context({ source: 'bearer' })).ok).toBe(true)
     })
   })
 

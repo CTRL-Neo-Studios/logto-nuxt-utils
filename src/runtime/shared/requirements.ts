@@ -49,11 +49,15 @@ export interface AuthRequirements {
     roles?: readonly string[]
   }
   /**
-   * Require a verified email address. Defaults to `false`.
+   * Require a verified email address. Defaults to **`true`**.
    *
-   * Reads the `email_verified` claim. An absent claim counts as verified, so this
-   * cannot lock out callers whose token simply does not carry it — which includes
-   * bearer callers, since `email_verified` is an ID-token claim.
+   * Reads the `email_verified` claim, rejecting a caller whose claim is explicitly
+   * `false`. Pass `verified: false` to allow unverified callers — a deliberate opt-out,
+   * so that forgetting to think about it fails closed rather than open.
+   *
+   * An **absent** claim counts as verified, which is what keeps this default safe:
+   * `email_verified` is an ID-token claim, so bearer callers carry none and would
+   * otherwise all be rejected. Absence means "no such concept here", not "unverified".
    */
   verified?: boolean
 }
@@ -104,7 +108,9 @@ export function ctxIsVerified(ctx: AuthContext | null | undefined): boolean {
  * Checks run permissions first, then roles, then organization, then verification, so
  * the reported failure is the most specific and most likely to be actionable.
  *
- * With no requirements, being authenticated is sufficient.
+ * With no requirements, an authenticated caller with a verified email is sufficient:
+ * verification is required by default, so a caller whose `email_verified` claim is
+ * explicitly `false` is rejected even here. Pass `{ verified: false }` to allow them.
  */
 export function checkRequirements(
   ctx: AuthContext | null | undefined,
@@ -182,7 +188,10 @@ export function checkRequirements(
     }
   }
 
-  if (requirements.verified === true && !ctxIsVerified(ctx)) {
+  // Defaults to required: only an explicit `false` waives it, so omitting the field
+  // fails closed. Callers whose token carries no `email_verified` claim at all are
+  // still admitted — see `ctxIsVerified`.
+  if (requirements.verified !== false && !ctxIsVerified(ctx)) {
     return {
       ok: false,
       failed: 'verified',

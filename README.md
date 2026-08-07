@@ -131,7 +131,7 @@ interface AuthRequirements {
   anyPermission?: Permission[]    // at least one
   roles?: string[]                // exact match, any of  (secondary)
   organization?: { id: string, roles?: string[] }
-  verified?: boolean              // default false
+  verified?: boolean              // default TRUE — pass false to allow unverified
 }
 ```
 
@@ -447,9 +447,11 @@ Add it in the Logto console, or remove it from the config.
   of permissions, a permission check tests the same thing more durably — and works for
   both caller types. If you do need roles service-to-service, add a `roles` claim to
   your access tokens with a Logto JWT customizer; the module honours it when present.
-- **`verified` will not reject a bearer caller.** `email_verified` is an ID-token
-  claim, and an absent claim counts as verified rather than unverified — otherwise the
-  requirement would lock out every service-to-service call.
+- **`verified` defaults to `true`.** An unverified caller is rejected unless you pass
+  `verified: false`, so forgetting to consider it fails closed. It still will not
+  reject a **bearer** caller: `email_verified` is an ID-token claim, and an absent
+  claim counts as verified rather than unverified — otherwise the default would lock
+  out every service-to-service call.
 - **Roles and permissions are a snapshot** from token issue time (typically one hour).
   Use `refreshAuthContext()` to apply a role change immediately.
 - **Never trust `getAccessTokenClaims` for inbound tokens.** It is a base64 decode with
