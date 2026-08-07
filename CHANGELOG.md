@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.7
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.6...v0.1.7)
+
+### 🚀 Enhancements
+
+- **requirements:** Require verified email by default ([f639a51](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/f639a51))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.6
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.5...v0.1.6)
