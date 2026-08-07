@@ -1,6 +1,22 @@
 # Changelog
 
 
+## v0.1.6
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.5...v0.1.6)
+
+### 🚀 Enhancements
+
+- **auth:** Rename requireUser to requireLogtoUser and return Logto claims ([f298cbe](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/f298cbe))
+
+### 🏡 Chore
+
+- **release:** V0.1.5 ([0c4befa](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/0c4befa))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.5
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.4...v0.1.5)
