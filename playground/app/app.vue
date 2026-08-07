@@ -64,7 +64,7 @@ const isVerifiedEditor = computed(() =>
     <ul>
       <li><a href="/api/whoami">/api/whoami</a> — unified session or bearer context</li>
       <li><a href="/api/guarded">/api/guarded</a> — <code>requirePermission</code></li>
-      <li><a href="/api/required">/api/required</a> — <code>requireUser</code> + requirements</li>
+      <li><a href="/api/required">/api/required</a> — <code>requireLogtoUser</code> + requirements</li>
       <li><a href="/api/gated">/api/gated</a> — ability via <code>authorize</code></li>
     </ul>
   </div>

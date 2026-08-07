@@ -12,7 +12,23 @@ import {
   useServerLogtoClient,
   useServerLogtoUser,
 } from './logto'
+import { describeLogtoOidcError, formatLogtoOidcError } from '../../shared/diagnostics'
 import { useRuntimeConfig } from '#imports'
+
+/**
+ * Resources already warned about, so a recurring condition is reported once.
+ *
+ * Failing to mint a resource token is an expected steady state, not an incident:
+ * Logto declines outright when the user holds no permissions on a resource, and a
+ * session predating a newly added resource fails every single request until the user
+ * signs in again. Logging the full error each time buried one page load under three
+ * identical forty-line stack traces.
+ *
+ * Keyed by resource *and* error code so a genuinely new failure still surfaces. The
+ * set is process-lifetime because it exists to keep a dev server's console readable,
+ * and the underlying causes are config- or session-shaped rather than transient.
+ */
+const warnedResourceFailures = new Set<string>()
 
 /** Caches the in-flight context per request so repeated guards cost nothing. */
 const pendingContexts = new WeakMap<H3Event, Promise<AuthContext>>()
@@ -136,11 +152,22 @@ async function resolveResourceScopes(
       return parseScopeClaim(claims.scope)
     }
     catch (error) {
-      console.warn(
-        `[logto-rbac] Could not obtain a '${resource}' access token; contributing no `
-        + 'permissions from it.',
-        error,
-      )
+      const info = describeLogtoOidcError(error)
+      const key = `${resource}@${info?.error ?? 'unknown'}`
+
+      // Report each distinct condition once. The stack trace is deliberately dropped:
+      // it points into `@logto/client`'s requester, never at anything the consumer
+      // can act on, whereas the hint says exactly what to do.
+      if (!warnedResourceFailures.has(key)) {
+        warnedResourceFailures.add(key)
+
+        console.warn(
+          `[logto-rbac] Could not obtain a '${resource}' access token; contributing no `
+          + 'permissions from it.'
+          + (info ? `\n${formatLogtoOidcError(info)}\n` : ` ${String(error)}`),
+        )
+      }
+
       return []
     }
   }))
@@ -198,5 +225,11 @@ export async function refreshAuthContext(event: H3Event): Promise<AuthContext> {
   const client = await useServerLogtoClient(event)
   await client.clearAccessToken()
   pendingContexts.delete(event)
+
+  // An explicit refresh is the point at which a previously failing resource may start
+  // working, so forget what has been warned about — otherwise a condition that
+  // recurs after the refresh would be silently suppressed.
+  warnedResourceFailures.clear()
+
   return useSessionAuthContext(event)
 }

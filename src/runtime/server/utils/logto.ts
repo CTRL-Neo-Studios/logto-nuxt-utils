@@ -15,6 +15,16 @@ export type ServerLogtoClient = H3Event['context']['logtoClient']
 export type ServerLogtoUser = H3Event['context']['logtoUser']
 
 /**
+ * The Logto user claims, guaranteed present.
+ *
+ * The guards in `authorize.ts` return this rather than the nullable
+ * {@link ServerLogtoUser}: they have already established that the caller is
+ * authenticated, so handing back something possibly-`undefined` would push a null
+ * check onto every call site for a case the guard just ruled out.
+ */
+export type ServerLogtoUserClaims = NonNullable<ServerLogtoUser>
+
+/**
  * Tracks the in-flight `logtoEventHandler` call for each request.
  *
  * The handler does real work: it constructs a client, decrypts the cookie

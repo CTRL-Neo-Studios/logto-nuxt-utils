@@ -30,8 +30,8 @@ export interface AuthMiddlewareOptions extends AuthRequirements {
 /**
  * Builds a route middleware enforcing declarative requirements.
  *
- * The client-side counterpart to `requireUser`, using the very same checks, so a page
- * guard cannot drift from the route handler behind it.
+ * The client-side counterpart to `requireLogtoUser`, using the very same checks, so a
+ * page guard cannot drift from the route handler behind it.
  *
  * @example
  * ```ts

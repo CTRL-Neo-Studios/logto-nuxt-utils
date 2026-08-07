@@ -10,9 +10,10 @@ import {
 /**
  * Declarative authorization requirements.
  *
- * One vocabulary evaluated identically on the server (`requireUser`), on the client
- * (`useAuthorization().satisfies`) and inside abilities (`definePermissionGates`), so
- * a rule is expressed once and behaves the same everywhere.
+ * One vocabulary evaluated identically on the server (`requireLogtoUser`), on the
+ * client (`useAuthorization().satisfies`) and inside abilities
+ * (`definePermissionGates`), so a rule is expressed once and behaves the same
+ * everywhere.
  *
  * Everything here is a pure function of the {@link AuthContext}: no Nuxt context, no
  * runtime config, no I/O.

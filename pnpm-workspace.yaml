@@ -1,6 +1,17 @@
 packages:
   - playground
 
+# Vue keeps module-level render state (`currentRenderingInstance`), so two copies in
+# one app is not merely wasteful — it is a hydration crash. A component resolved from
+# copy A renders a slot while copy B holds the active instance, and `renderSlot`
+# dereferences `null`.
+#
+# The root and the playground can otherwise resolve different Nuxt patches (4.5.1 vs
+# 4.5.2), each dragging its own Vue, so the version is pinned here for every workspace
+# package at once.
+overrides:
+  vue: 3.5.41
+
 # Mirrors the policy used in the consuming projects. Vite 8 builds with
 # rolldown/oxc, so esbuild's native postinstall is unnecessary, and unrs-resolver
 # is only used by ESLint's import resolver.

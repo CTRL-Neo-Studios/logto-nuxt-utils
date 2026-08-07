@@ -32,7 +32,7 @@ export default defineNuxtConfig({
      * `invalid_target: resource indicator is missing, or unknown`.
      */
     resources: [
-      process.env.NUXT_LOGTO_API_RESOURCE || 'https://playground.example.com/api/v1',
+      process.env.NUXT_LOGTO_API_RESOURCE,
     ],
     /**
      * Each of these must exist as a permission on the resource above, otherwise Logto

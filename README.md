@@ -102,12 +102,27 @@ One guard covers everything, so a route handler never contains a hand-written
 ```ts
 // server/api/assessments/index.get.ts
 export default defineEventHandler(async (event) => {
-  const ctx = await requireUser(event, { permissions: ['assessment:list'] })
-  return listAssessmentsFor(ctx.userId)
+  const user = await requireLogtoUser(event, { permissions: ['assessment:list'] })
+  return listAssessmentsFor(user.sub)
 })
 ```
 
-`requireUser(event)` with no second argument is a plain authentication check.
+`requireLogtoUser` returns the **Logto user claims** — the same shape
+`useServerLogtoUser(event)` yields, but never `undefined`, because reaching the next
+line proves there is a user. So `user.sub`, `user.email` and `user.roles` are all
+there without a null check.
+
+Permissions are **not** among those claims: they live in the `scope` claim of an
+access token, never in the ID token. When a handler needs them, ask the context:
+
+```ts
+const user = await requireLogtoUser(event, { permissions: ['assessment:list'] })
+const { scopes, source } = await useAuthContext(event)
+```
+
+That call is memoised per request, so it costs nothing once a guard has run.
+
+`requireLogtoUser(event)` with no second argument is a plain authentication check.
 Otherwise it takes **requirements**:
 
 ```ts
@@ -123,17 +138,21 @@ interface AuthRequirements {
 Requirements are checked permissions-first, then roles, then organization, then
 verification, so the reported failure is the most actionable one.
 
-| Guard | Behaviour |
-| --- | --- |
-| `requireUser(event, reqs?)` | 401 if not authenticated, 403 if a requirement is unmet |
-| `requirePermission(event, …perms)` | sugar for `{ permissions }` |
-| `requireAnyPermission(event, …perms)` | sugar for `{ anyPermission }` |
-| `requireRole(event, …roles)` | sugar for `{ roles }` |
-| `meetsRequirements(event, reqs?)` | non-throwing boolean |
-| `hasPermission(event, …perms)` | non-throwing boolean |
+| Guard | Returns | Behaviour |
+| --- | --- | --- |
+| `requireLogtoUser(event, reqs?)` | Logto claims | 401 if not authenticated, 403 if a requirement is unmet |
+| `requirePermission(event, …perms)` | Logto claims | sugar for `{ permissions }` |
+| `requireAnyPermission(event, …perms)` | Logto claims | sugar for `{ anyPermission }` |
+| `requireRole(event, …roles)` | Logto claims | sugar for `{ roles }` |
+| `meetsRequirements(event, reqs?)` | `boolean` | non-throwing |
+| `hasPermission(event, …perms)` | `boolean` | non-throwing |
 
 Every one of these funnels through the same `checkRequirements`, so authorization is
 decided in exactly one place — the same place the client and the abilities use.
+
+A **bearer** caller has no Logto session, so its claims are the verified access-token
+payload: `sub` and `scope` are present, profile claims like `email` normally are not.
+Read `sub` and permissions, not profile fields, in a route that serves both.
 
 Failures carry a machine-readable payload:
 
@@ -337,12 +356,11 @@ friends), it could satisfy a permission check it was never intended for. Keeping
 of bug by construction.
 
 ---
-
 ## Server utilities
 
 | Helper | Purpose |
 | --- | --- |
-| `useAuthContext(event)` | the caller, from a session cookie **or** a verified bearer token |
+| `useAuthContext(event)` | the caller, from a session cookie **or** a verified bearer token; memoised per request |
 | `useSessionAuthContext(event)` | session cookie only |
 | `refreshAuthContext(event)` | drop cached tokens and re-read, after a role change |
 | `verifyAccessToken(token, event?)` | verify an arbitrary Logto JWT (JWKS, `iss`, `aud`, `exp`) |
@@ -379,20 +397,28 @@ Code alone is not enough:
 4. **Sign in again.** Scopes are granted to the refresh token at sign-in and cannot be
    added afterwards, so existing sessions will never see new permissions.
 
-### Sign-in fails with `invalid_target`
+### `invalid_target` — two different causes
 
 ```
-error=invalid_target&error_description=resource+indicator+is+missing%2C+or+unknown
+error=invalid_target ... resource indicator is missing, or unknown
 ```
 
-An entry in `resources` or `additionalResources` is **not registered in Logto**. Every
-resource is sent as an RFC 8707 `resource` parameter and validated by Logto's
-authorization endpoint, so an unknown indicator fails the whole sign-in — and it
-surfaces at the callback, far from the config that caused it.
+Logto sends the **same** code for two unrelated problems, and only one is a
+misconfiguration. Which endpoint rejected it tells you which:
 
-Check for a leftover placeholder, a typo, or a trailing slash. The module warns at
-build time when a resource looks like a placeholder, and explains this error in the
-server log if it does occur.
+| Where it appears | Meaning | Fix |
+| --- | --- | --- |
+| At the **sign-in callback** | the indicator is not registered in Logto | fix `resources` / the console |
+| In the **server log** while resolving permissions | the resource *is* registered, but this session's refresh token predates it | **sign out and sign in again** |
+
+The second case is easy to misread as the first. Resources and scopes are bound to the
+refresh token when it is issued, so adding a resource to `logtoRbac.resources` leaves
+every existing session unable to exchange for a token against it — Logto reports the
+resource as "unknown" *for that token* even though the authorization endpoint accepts
+the very same string. The module tells the two apart and prints the right advice.
+
+For the first case, check for a leftover placeholder, a typo, or a trailing slash. The
+module warns at build time when a resource looks like a placeholder.
 
 ### Sign-in fails with `invalid_scope`
 

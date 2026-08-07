@@ -51,7 +51,7 @@ type ContextAuthorizer = (
  * false}` *before* the authorizer runs, which would collapse "not signed in" and
  * "signed in but lacking a permission" into the same 403. Handling the guest case
  * ourselves is what allows a 401 to be reported for the former, matching the server
- * guards (`requireUser` / `requirePermission`).
+ * guards (`requireLogtoUser` / `requirePermission`).
  *
  * The cast is confined to this one function: `BouncerAuthorizer` types its first
  * parameter as non-nullable, yet the runtime passes `null` for guests precisely when
@@ -72,8 +72,8 @@ function denyForbidden(message: string): AuthorizationResponse {
  * The single ability builder: turns declarative requirements into an ability.
  *
  * Delegates to the same `checkRequirements` the server guards use, so a rule behaves
- * identically whether it is enforced by `requireUser` in a route or by `<Can>` in a
- * template — including the 401-versus-403 distinction.
+ * identically whether it is enforced by `requireLogtoUser` in a route or by `<Can>` in
+ * a template — including the 401-versus-403 distinction.
  */
 export function defineRequirementsAbility(requirements: AuthRequirements): PermissionAbility {
   return defineContextAbility((user) => {
@@ -128,7 +128,7 @@ export function defineOrganizationRoleAbility(
  *
  * A bare permission or an array of them is the common case and means *all* of them;
  * anything else is a full {@link AuthRequirements} object, the same vocabulary used by
- * `requireUser` and by the client composable.
+ * `requireLogtoUser` and by the client composable.
  */
 export type GateSpec = RequirementsInput
 

@@ -126,13 +126,16 @@ export async function useBearerAuthContext(event: H3Event): Promise<AuthContext 
 }
 
 /**
- * The single entry point for "who is calling this route".
+ * Caches the resolved context per request.
  *
- * Prefers a verified bearer token (a sibling service calling in) and falls back to
- * the Logto session cookie (a browser user), yielding the same shape either way so
- * that one set of guards and abilities covers both.
+ * `useSessionAuthContext` already memoises the session path, but the bearer path
+ * runs `jwtVerify` — a signature check, and potentially a JWKS fetch. Every guard
+ * calls this, and a route that both guards and then re-reads `scopes` would
+ * otherwise verify the same token twice.
  */
-export async function useAuthContext(event: H3Event): Promise<AuthContext> {
+const pendingContexts = new WeakMap<H3Event, Promise<AuthContext>>()
+
+async function buildAuthContext(event: H3Event): Promise<AuthContext> {
   const bearer = await useBearerAuthContext(event)
   if (bearer) return bearer
 
@@ -143,4 +146,31 @@ export async function useAuthContext(event: H3Event): Promise<AuthContext> {
     console.warn('[logto-rbac] Failed to resolve session auth context:', error)
     return createAnonymousContext()
   }
+}
+
+/**
+ * The single entry point for "who is calling this route".
+ *
+ * Prefers a verified bearer token (a sibling service calling in) and falls back to
+ * the Logto session cookie (a browser user), yielding the same shape either way so
+ * that one set of guards and abilities covers both.
+ *
+ * Memoised for the lifetime of the request, so calling it repeatedly — which the
+ * guards do — costs one resolution.
+ */
+export function useAuthContext(event: H3Event): Promise<AuthContext> {
+  const pending = pendingContexts.get(event)
+  if (pending) return pending
+
+  // Cached before the promise settles so concurrent callers share one resolution.
+  // A rejection is not cached: `buildAuthContext` maps session failures to an
+  // anonymous context, and a bad bearer token must throw 401 for every caller
+  // rather than only the first.
+  const promise = buildAuthContext(event).catch((error) => {
+    pendingContexts.delete(event)
+    throw error
+  })
+
+  pendingContexts.set(event, promise)
+  return promise
 }

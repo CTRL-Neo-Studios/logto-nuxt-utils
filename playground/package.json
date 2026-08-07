@@ -10,6 +10,6 @@
   "dependencies": {
     "@logto/nuxt": "^1.2.10",
     "@type32/logto-nuxt-utils": "workspace:*",
-    "nuxt": "^4.5.1"
+    "nuxt": "^4.5.2"
   }
 }

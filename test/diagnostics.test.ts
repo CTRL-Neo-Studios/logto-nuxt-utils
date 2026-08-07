@@ -14,6 +14,16 @@ function logtoError(error: string, errorDescription?: string) {
   }
 }
 
+/**
+ * Mirrors `LogtoRequestError` from a failed token exchange.
+ *
+ * Structurally different from the callback error: it namespaces the code and carries
+ * no `error` property at all, which is why it went undetected before.
+ */
+function logtoRequestError(code: string, message: string) {
+  return { name: 'LogtoRequestError', code, message, cause: { status: 400 } }
+}
+
 describe('describeLogtoOidcError', () => {
   it('reads the error out of a LogtoError `data` payload', () => {
     const info = describeLogtoOidcError(
@@ -80,6 +90,41 @@ describe('describeLogtoOidcError', () => {
 
       expect(info?.error).toBe('some_future_code')
       expect(info?.hint).toBeUndefined()
+    })
+
+    /**
+     * The bug this guards: `invalid_target` from a token exchange means the resource
+     * IS registered but the session's refresh token predates it. Sending someone to
+     * re-audit correct console config wastes their time, so the two must differ.
+     */
+    it('tells a stale session to sign in again rather than blaming the console', () => {
+      const info = describeLogtoOidcError(
+        logtoRequestError('oidc.invalid_target', 'Invalid resource indicator.'),
+      )
+
+      expect(info?.error).toBe('invalid_target')
+      expect(info?.source).toBe('token')
+      expect(info?.hint).toMatch(/sign in again/iu)
+    })
+
+    it('still blames config for invalid_target from the authorization endpoint', () => {
+      const info = describeLogtoOidcError(logtoError('invalid_target'))
+
+      expect(info?.source).toBe('authorization')
+      expect(info?.hint).not.toMatch(/sign in again/iu)
+    })
+
+    it('falls back to the generic hint when a code has no source-specific one', () => {
+      // `invalid_scope` means the same thing from either endpoint, so the token-side
+      // failure must not silently lose its hint.
+      expect(describeLogtoOidcError(logtoRequestError('oidc.invalid_scope', 'nope'))?.hint)
+        .toContain('logtoRbac.permissions')
+    })
+
+    it('ignores non-oidc Logto request error codes', () => {
+      // Logto's own API errors share the class but are not OAuth failures.
+      expect(describeLogtoOidcError(logtoRequestError('user.not_found', 'nope')))
+        .toBeUndefined()
     })
   })
 })
