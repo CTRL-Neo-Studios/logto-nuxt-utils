@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.8
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.7...v0.1.8)
+
+### 🚀 Enhancements
+
+- **auth:** Add useCan, useLogtoSession, and enrich useAuthorization with profile state ([46a4bf8](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/46a4bf8))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.7
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.6...v0.1.7)
