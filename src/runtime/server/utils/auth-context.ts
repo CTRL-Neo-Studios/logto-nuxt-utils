@@ -14,6 +14,7 @@ import {
   useServerLogtoClient,
   useServerLogtoUser,
 } from './logto'
+import { fingerprintPermissions, readSessionGrant, writeSessionGrant } from './grant'
 import { describeLogtoOidcError, formatLogtoOidcError } from '../../shared/diagnostics'
 import { useRuntimeConfig } from '#imports'
 
@@ -55,6 +56,24 @@ function useLogtoRuntimeConfig(event?: H3Event): LogtoRuntimeConfigView {
 }
 
 /**
+ * The subset of `runtimeConfig.logtoRbac` this module reads.
+ *
+ * Fields are optional because a consumer may be running a build that predates any of
+ * them; every reader supplies the same default the module would have written.
+ */
+interface RbacRuntimeConfigView {
+  resources?: string[]
+  revalidateAfter?: number
+  detectStaleGrant?: boolean
+  permissions?: string[]
+}
+
+function useRbacRuntimeConfig(event?: H3Event): RbacRuntimeConfigView {
+  const config = useRuntimeConfig(event) as unknown as Record<string, unknown>
+  return (config.logtoRbac ?? {}) as RbacRuntimeConfigView
+}
+
+/**
  * The API resources this app owns, as declared in `rbac.config.ts`.
  *
  * Deliberately read from this module's own runtime config rather than from
@@ -64,10 +83,7 @@ function useLogtoRuntimeConfig(event?: H3Event): LogtoRuntimeConfigView {
  * for another service being honoured here.
  */
 export function useOwnedResources(event?: H3Event): string[] {
-  const config = useRuntimeConfig(event) as unknown as {
-    logtoRbac?: { resources?: string[] }
-  }
-  return config.logtoRbac?.resources ?? []
+  return useRbacRuntimeConfig(event).resources ?? []
 }
 
 /** Every resource requested at sign-in, owned or not. */
@@ -177,15 +193,100 @@ async function resolveResourceScopes(
   return [...new Set(perResource.flat())]
 }
 
+/**
+ * Brings a session's tokens and bookkeeping up to date, and reports what it found.
+ *
+ * Two facts drive this. Logto reflects *reduced* grants — a revoked permission, a
+ * removed role — on the next token issuance, but a cached access token is reused until
+ * its own expiry, so forcing issuance is what makes a revocation take effect. And Logto
+ * issues only scopes from the original authorization request, so a permission added
+ * after sign-in can never reach an existing session at all, no matter how many times
+ * its tokens are re-issued; that case can only be reported.
+ *
+ * `clearAccessToken` drops just the cached access tokens. The refresh token is
+ * untouched, so the `getAccessTokenClaims` that follows performs a refresh grant, which
+ * also returns a fresh ID token and therefore current `roles`.
+ */
+async function revalidateSession(
+  event: H3Event,
+  client: ServerLogtoClient,
+): Promise<{ revalidated: boolean, needsReauthorization: boolean | undefined }> {
+  const { revalidateAfter = 0, detectStaleGrant, permissions = [] } = useRbacRuntimeConfig(event)
+  const detect = detectStaleGrant !== false
+  const idle = { revalidated: false, needsReauthorization: undefined }
+
+  if (revalidateAfter <= 0 && !detect) return idle
+
+  // Read from the ID token rather than from `event.context.logtoUser`, which is the
+  // *userinfo* response when `logto.fetchUserInfo` is on and carries no `iat`. This is a
+  // local decode of the token already in the cookie, so it costs no network call.
+  //
+  // Without an `iat` the record cannot be tied to a token, so it could never be
+  // invalidated when the session is re-authorized. An untrackable session keeps the
+  // pre-existing reuse-until-expiry behaviour rather than being tracked wrongly.
+  const issuedAt = (await client.getIdTokenClaims().catch(() => undefined))?.iat
+  if (typeof issuedAt !== 'number') return idle
+
+  const now = Math.floor(Date.now() / 1000)
+  const stored = await readSessionGrant(client)
+  const fingerprint = fingerprintPermissions(permissions)
+
+  // A record from before this ID token was issued describes a grant that no longer
+  // exists — the session went through the sign-in callback, which `@logto/nuxt` owns and
+  // this module never sees. Adopting it here is what lets `reauthorize()` clear the
+  // flag; `signIn` clears only Logto's own token keys, so the record itself survives.
+  //
+  // A session with no record at all predates this feature or has just signed in. Either
+  // way it is adopted as current rather than reported stale: nothing is known about what
+  // it was granted, and its tokens are either freshly minted or already being trusted.
+  if (!stored || stored.issuedAt !== issuedAt) {
+    await writeSessionGrant(client, { issuedAt, fetchedAt: now, fingerprint })
+    return { revalidated: false, needsReauthorization: detect ? false : undefined }
+  }
+
+  const needsReauthorization = detect ? stored.fingerprint !== fingerprint : undefined
+
+  if (revalidateAfter <= 0 || now - stored.fetchedAt < revalidateAfter) {
+    return { revalidated: false, needsReauthorization }
+  }
+
+  await client.clearAccessToken()
+
+  // Recorded before the refresh rather than after it, deliberately: a resource whose
+  // token Logto declines to mint would otherwise leave `fetchedAt` untouched and force a
+  // failing exchange on every single request.
+  await writeSessionGrant(client, { issuedAt, fetchedAt: now, fingerprint })
+
+  return { revalidated: true, needsReauthorization }
+}
+
 /** Builds the context from the encrypted Logto session cookie. */
 async function buildSessionAuthContext(event: H3Event): Promise<AuthContext> {
   const client = await useServerLogtoClient(event)
 
   if (!(await client.isAuthenticated())) return createAnonymousContext()
 
-  // ID-token claims: free, already decrypted from the session cookie.
-  const claims = await useServerLogtoUser(event)
+  const { revalidated, needsReauthorization } = await revalidateSession(event, client)
+
+  // Resource tokens after revalidating: on a stale session that exchange is the refresh
+  // grant, which replaces the stored ID token, so the claims must be read afterwards.
   const scopes = await resolveResourceScopes(event, client)
+
+  const captured = await useServerLogtoUser(event)
+
+  // `@logto/nuxt`'s handler captured `event.context.logtoUser` before any refresh could
+  // run, so on a revalidated session the ID-token path holds the pre-refresh roles.
+  // Re-decode the stored token to observe the roles the refresh grant just returned — a
+  // local decode, not a network call, guarded because a malformed stored token throws and
+  // a throw here must not turn a working session anonymous.
+  //
+  // Skipped when `fetchUserInfo` is on: those claims came from the userinfo endpoint, so
+  // they are already live *and* carry `custom_data` and `identities`, which the ID token
+  // does not. Substituting the token's claims would trade richer, equally fresh data for
+  // poorer data.
+  const claims = revalidated && !useLogtoRuntimeConfig(event).fetchUserInfo
+    ? await client.getIdTokenClaims().catch(() => undefined) ?? captured
+    : captured
 
   return {
     isAuthenticated: true,
@@ -198,6 +299,7 @@ async function buildSessionAuthContext(event: H3Event): Promise<AuthContext> {
     claims: claims as Record<string, unknown> | undefined,
     profile: profileFromClaims(claims as Record<string, unknown> | undefined),
     isVerified: verifiedFromClaims(claims as Record<string, unknown> | undefined),
+    needsReauthorization,
   }
 }
 
@@ -217,10 +319,14 @@ export function useSessionAuthContext(event: H3Event): Promise<AuthContext> {
 /**
  * Discards the cached tokens and re-reads the context from Logto.
  *
- * Roles and permissions are a snapshot taken when the token was issued, so
- * changing a user's roles in Logto does not affect an already-issued token (its
- * lifetime is typically one hour). Call this after a role change to make the new
- * grants effective immediately instead of waiting out the TTL.
+ * Roles and permissions are a snapshot taken when the token was issued. Revalidation
+ * already happens on its own every `logtoRbac.revalidateAfter` seconds; this forces it
+ * immediately, for the case where the app itself just changed a user's roles and must
+ * not serve one more request with the old ones.
+ *
+ * It cannot grant a permission the session was never authorized for — Logto issues only
+ * scopes from the original authorization request — which is what
+ * `needsReauthorization` reports.
  *
  * Note this clears every cached access token for the session, not only this
  * resource's.

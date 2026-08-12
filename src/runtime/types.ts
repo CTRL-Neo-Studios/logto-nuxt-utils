@@ -143,6 +143,16 @@ export interface AuthContext {
    * behaviour for a claim-less context.
    */
   isVerified?: boolean
+  /**
+   * Whether this session's grant predates the current permission list, so some
+   * configured permissions can never appear in its tokens.
+   *
+   * Logto issues only scopes from the original authorization request, so a permission
+   * added after sign-in requires a new authorization flow — a refresh grant cannot
+   * supply it. Optional so existing synthetic contexts stay valid; absent means "not
+   * known to be stale".
+   */
+  needsReauthorization?: boolean
 }
 
 /**

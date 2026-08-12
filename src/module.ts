@@ -111,6 +111,31 @@ export interface ModuleOptions {
    */
   sessionEndpoint?: string
   /**
+   * How long a resolved session context may be reused before its resource tokens are
+   * re-fetched from Logto, in **seconds**.
+   *
+   * Logto reflects *reduced* grants on the next token issuance, but a cached access
+   * token is reused until its own expiry (default one hour), so a revoked permission
+   * keeps working until then. Within this window the cached token is used; past it,
+   * the cached access token is discarded and a refresh grant is performed, which also
+   * refreshes the stored ID token and therefore the `roles` claim.
+   *
+   * Costs one refresh-token exchange per owned resource per window per active session.
+   * Set to `0` to disable revalidation and reuse tokens until they expire.
+   */
+  revalidateAfter?: number
+  /**
+   * Detect sessions whose grant predates the current permission list.
+   *
+   * A permission that was not requested at sign-in can never be obtained by a refresh
+   * grant — Logto only issues scopes from the original authorization request — so
+   * deploying a new permission leaves existing sessions permanently unable to hold it.
+   * When enabled, the module records the requested permission set at the sign-in
+   * callback and sets `needsReauthorization` on the context once it no longer matches,
+   * so the app can prompt for re-authorization instead of silently denying.
+   */
+  detectStaleGrant?: boolean
+  /**
    * Register `nuxt-authorization` automatically.
    *
    * It requires no configuration of its own, so installing it here saves consumers
@@ -190,6 +215,8 @@ export default defineNuxtModule<ModuleOptions>({
     permissions: [],
     userScopes: [],
     sessionEndpoint: '/api/_auth/session',
+    revalidateAfter: 300,
+    detectStaleGrant: true,
     installAuthorizationModule: true,
     installClientResolver: true,
   },
@@ -214,6 +241,7 @@ export default defineNuxtModule<ModuleOptions>({
       .filter(entry => entry.resource.length > 0)
     const additionalResourceIndicators = unique(additionalResources.map(entry => entry.resource))
     const permissions = unique(options.permissions ?? [])
+    const revalidateAfter = Math.max(0, Math.trunc(options.revalidateAfter ?? 300))
 
     if (ownedResources.length === 0) {
       logger.warn(
@@ -325,22 +353,32 @@ export default defineNuxtModule<ModuleOptions>({
     })
 
     /**
-     * The owned resources, published privately for the server runtime.
+     * The owned resources and freshness policy, published privately for the server
+     * runtime.
      *
-     * This cannot be derived from `logto.resources`, which intentionally also holds
-     * other services' resources. Keeping the owned list separate is what stops a
-     * token minted for another service from being accepted here as though it were
-     * meant for us.
+     * The resource list cannot be derived from `logto.resources`, which intentionally
+     * also holds other services' resources. Keeping the owned list separate is what
+     * stops a token minted for another service from being accepted here as though it
+     * were meant for us.
      */
-    nuxt.options.runtimeConfig.logtoRbac = { resources: ownedResources }
+    nuxt.options.runtimeConfig.logtoRbac = {
+      resources: ownedResources,
+      revalidateAfter,
+      detectStaleGrant: options.detectStaleGrant !== false,
+      // Sorted so the fingerprint is order-insensitive: reordering `permissions` in
+      // nuxt.config must not invalidate every live session.
+      permissions: [...permissions].sort(),
+    }
 
-    // Exposed publicly so the client plugin knows where to resolve the session, and so
-    // client-side guards can redirect to sign-in. `signInPath` is filled in during
-    // `modules:done`, once @logto/nuxt has resolved its own defaults.
+    // Exposed publicly so the client plugin knows where to resolve the session, so
+    // client-side guards can redirect to sign-in, and so the client can expire its own
+    // cached verdict on the same schedule as the server. `signInPath` is filled in
+    // during `modules:done`, once @logto/nuxt has resolved its own defaults.
     nuxt.options.runtimeConfig.public.logtoRbac = {
       sessionEndpoint,
       signInPath: '/sign-in',
       signOutPath: '/sign-out',
+      revalidateAfter,
     }
 
     // -------------------------------------------------------------- wiring
@@ -584,6 +622,12 @@ declare module '@nuxt/schema' {
        * only resources whose scopes contribute to the caller's permissions.
        */
       resources: string[]
+      /** Seconds a resolved context may be reused before resource tokens are re-fetched. */
+      revalidateAfter: number
+      /** Whether to flag sessions whose grant predates the current permission list. */
+      detectStaleGrant: boolean
+      /** Configured permissions, sorted, for the session grant fingerprint. */
+      permissions: string[]
     }
   }
 
@@ -595,6 +639,8 @@ declare module '@nuxt/schema' {
       signInPath: string
       /** Logto sign-out path, mirrored from private config for client-side navigation. */
       signOutPath: string
+      /** Seconds the client may reuse a resolved context before refetching it. */
+      revalidateAfter: number
     }
   }
 }

@@ -37,5 +37,9 @@ export default defineNuxtConfig({
       'assessment:view',
       'assessment:edit',
     ],
+
+    // Non-default, so reaching both the private and public runtime config is proven
+    // rather than coincidentally matching the default.
+    revalidateAfter: 60,
   },
 })

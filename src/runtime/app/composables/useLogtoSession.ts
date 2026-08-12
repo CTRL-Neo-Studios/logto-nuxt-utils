@@ -7,6 +7,21 @@ export interface UseLogtoSessionReturn {
   signOutPath: string
   signIn: () => Promise<void>
   signOut: () => Promise<void>
+  /**
+   * Starts a new Logto authorization request for the current user.
+   *
+   * This is the only way to obtain a permission that was added after the user signed
+   * in: Logto issues only scopes from the original authorization request, so a refresh
+   * grant can never enlarge a session's permissions. Navigates to the same sign-in
+   * route as {@link UseLogtoSessionReturn.signIn} — an already-authenticated user is
+   * not asked for credentials again, but a new grant covering the current permission
+   * list is issued, since `@logto/client` signs in with `clearTokens` and a consent
+   * prompt by default, replacing the stale grant rather than merging into it.
+   *
+   * Pair it with `useAuthorization().needsReauthorization`, which reports exactly when
+   * this is needed.
+   */
+  reauthorize: () => Promise<void>
 }
 
 /**
@@ -45,6 +60,9 @@ export function useLogtoSession(): UseLogtoSessionReturn {
     },
     signOut: async () => {
       await navigateTo(signOutPath, { external: true })
+    },
+    reauthorize: async () => {
+      await navigateTo(signInPath, { external: true })
     },
   }
 }

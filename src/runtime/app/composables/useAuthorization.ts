@@ -68,6 +68,12 @@ export interface UseAuthorizationReturn {
   error: Ref<string | null>
   /** True once a verdict exists, so a `false` from `can()` means "no" and not "not yet". */
   ready: ComputedRef<boolean>
+  /**
+   * True when this session's grant predates the current permission list, so some
+   * configured permissions can never appear in its tokens. Call
+   * `useLogtoSession().reauthorize()` to fix it.
+   */
+  needsReauthorization: ComputedRef<boolean>
   /** Ensures the context has been fetched, returning it. */
   resolve: () => Promise<ClientAuthContext | null>
   /** Discards the cached context and fetches it again. */
@@ -109,6 +115,13 @@ interface AuthRequestState {
   error: Ref<string | null>
   /** Whether a verdict has been obtained at least once in this app instance. */
   resolved: Ref<boolean>
+  /**
+   * Epoch-ms of the last successful resolve, used to expire the cached verdict.
+   *
+   * `null` until one completes in this app instance, which includes the hydrated case:
+   * the server sends the context but no timestamp for it.
+   */
+  resolvedAt: number | null
 }
 
 /**
@@ -124,7 +137,13 @@ const requestStates = new WeakMap<NuxtApp, AuthRequestState>()
 function useRequestState(nuxtApp: NuxtApp): AuthRequestState {
   let state = requestStates.get(nuxtApp)
   if (!state) {
-    state = { pending: null, isPending: ref(false), error: ref(null), resolved: ref(false) }
+    state = {
+      pending: null,
+      isPending: ref(false),
+      error: ref(null),
+      resolved: ref(false),
+      resolvedAt: null,
+    }
     requestStates.set(nuxtApp, state)
   }
   return state
@@ -147,6 +166,7 @@ export function useAuthorization(): UseAuthorizationReturn {
       state.pending = requestFetch<ClientAuthContext>(endpoint)
         .then((result) => {
           user.value = result
+          state.resolvedAt = Date.now()
           return result
         })
         .catch((error) => {
@@ -171,7 +191,20 @@ export function useAuthorization(): UseAuthorizationReturn {
     // would silently never appear. Defer to the client, where the cookie exists.
     if (import.meta.prerender) return null
 
-    if (user.value) return user.value
+    const { revalidateAfter } = useRuntimeConfig().public.logtoRbac
+    // A hydrated payload arrives with no client-side timestamp; treat it as resolved at
+    // hydration time rather than immediately stale, otherwise every page load would
+    // refetch a context the server just sent.
+    state.resolvedAt ??= Date.now()
+
+    const isFresh = revalidateAfter <= 0
+      || Date.now() - state.resolvedAt < revalidateAfter * 1000
+
+    if (user.value && isFresh) return user.value
+    // A completed fetch leaves `pending` null already, but an in-flight one must not be
+    // reused for a revalidation: it would return the very verdict being expired.
+    if (user.value) state.pending = null
+
     return fetchContext()
   }
 
@@ -180,6 +213,7 @@ export function useAuthorization(): UseAuthorizationReturn {
     state.pending = null
     state.error.value = null
     state.resolved.value = false
+    state.resolvedAt = null
     return resolve()
   }
 
@@ -207,6 +241,7 @@ export function useAuthorization(): UseAuthorizationReturn {
     // Read from `profile` so `userId` and `profile.sub` can never disagree.
     userId: computed(() => profile.value.sub),
     organizations: computed(() => user.value?.organizations ?? []),
+    needsReauthorization: computed(() => user.value?.needsReauthorization ?? false),
     pending: state.isPending,
     error: state.error,
     // The second disjunct matters because a hydrated payload populates `user` while the

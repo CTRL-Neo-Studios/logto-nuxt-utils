@@ -245,6 +245,52 @@ const session = useLogtoSession()
 no `returnTo` argument: `@logto/nuxt` redirects to its statically configured
 `postCallbackRedirectUri` and ignores query parameters, so one could not be honoured.
 
+### Keeping permissions fresh
+
+Roles and permissions are a snapshot taken when a token was issued, so a change in the
+Logto console does not reach a signed-in user on its own. The module revalidates on a
+timer, and reports the one case that a timer cannot fix.
+
+**Reduced grants heal themselves.** Revoke a permission, or take a role away, and the
+change lands within `revalidateAfter` seconds (default `300`) with no sign-out. Past the
+window the module discards the cached access token and performs a refresh grant, which
+Logto answers with the current scopes — and with a fresh ID token, so `roles` updates
+too.
+
+**Gained permissions do not.** Logto issues only scopes that were requested in the
+original authorization request, so a permission added to `logtoRbac.permissions` after a
+user signed in can never appear in that session's tokens. No amount of refreshing
+helps; the session has to ask for the enlarged grant explicitly. Deploying a new
+permission therefore leaves every existing session unable to hold it.
+
+That case is detected rather than papered over. The module records which permission list
+a session was granted and compares it on each request:
+
+```vue
+<script setup lang="ts">
+const auth = useAuthorization()
+const session = useLogtoSession()
+
+await auth.resolve()
+</script>
+
+<template>
+  <button v-if="auth.needsReauthorization.value" @click="session.reauthorize()">
+    New permissions are available — reconnect
+  </button>
+</template>
+```
+
+`reauthorize()` starts a fresh authorization request. An already-signed-in user is not
+asked for credentials again; they return with a grant covering the current list, and the
+flag clears. Nothing redirects automatically — when to interrupt the user is the app's
+call.
+
+The cost is one refresh-token exchange per owned resource, per window, per active
+session. `revalidateAfter: 0` disables revalidation entirely and reuses tokens until
+they expire, which is how the module behaved before this existed;
+`detectStaleGrant: false` drops the flag and its one extra cookie field.
+
 ### Route guards
 
 ```ts
@@ -523,6 +569,8 @@ logtoRbac: {
   permissions: [],                         // sole source of the `Permission` type
   userScopes: [],                          // extra Logto user scopes
   sessionEndpoint: '/api/_auth/session',   // default
+  revalidateAfter: 300,                    // seconds; 0 disables revalidation
+  detectStaleGrant: true,                  // default: report `needsReauthorization`
   installAuthorizationModule: true,        // default
 }
 ```

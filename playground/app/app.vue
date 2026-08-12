@@ -34,6 +34,15 @@ const isVerifiedEditor = computed(() =>
       </button>
     </p>
 
+    <!-- The one case a refresh cannot fix: a permission added after this user signed in
+         was never in their grant, so only a new authorization request can supply it. -->
+    <p v-if="auth.needsReauthorization.value">
+      New permissions have been deployed since you signed in.
+      <button @click="session.reauthorize()">
+        Reconnect
+      </button>
+    </p>
+
     <h2>Session context</h2>
     <pre>{{ auth.user.value }}</pre>
 
@@ -49,6 +58,7 @@ const isVerifiedEditor = computed(() =>
       <li>scopes: {{ auth.scopes.value }}</li>
       <li>pending: {{ auth.pending.value }}</li>
       <li>ready: {{ auth.ready.value }}</li>
+      <li>needsReauthorization: {{ auth.needsReauthorization.value }}</li>
       <li>explain({{ '{ permissions: [\'assessment:edit\'] }' }}): {{ auth.explain({ permissions: ['assessment:edit'] }) }}</li>
     </ul>
     <button @click="auth.refresh()">

@@ -27,5 +27,6 @@ export default defineEventHandler(async (event): Promise<ClientAuthContext> => {
     organizationRoles: ctx.organizationRoles,
     profile: ctx.profile,
     isVerified: ctx.isVerified,
+    needsReauthorization: ctx.needsReauthorization,
   }
 })

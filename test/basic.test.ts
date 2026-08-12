@@ -6,6 +6,8 @@ interface Injected {
   scopes: string[]
   requested: string[]
   owned: string[]
+  revalidateAfter: number
+  publicRevalidateAfter: number
 }
 
 const OWNED = [
@@ -51,6 +53,16 @@ describe('logto-nuxt-utils', async () => {
       const { scopes } = await $fetch<Injected>('/api/injected')
       expect(scopes).toHaveLength(new Set(scopes).size)
     })
+
+    it('publishes revalidateAfter to both the server and the browser', async () => {
+      const injected = await $fetch<Injected>('/api/injected')
+
+      // The server expires resource tokens on the private value; the browser expires its
+      // cached verdict on the public one. A missing public value would leave the client
+      // serving a stale context forever even though the server had refreshed it.
+      expect(injected.revalidateAfter).toBe(60)
+      expect(injected.publicRevalidateAfter).toBe(60)
+    })
   })
 
   describe('audience separation', () => {
@@ -89,6 +101,13 @@ describe('logto-nuxt-utils', async () => {
     it('never leaks raw token claims to the client', async () => {
       const session = await $fetch<Record<string, unknown>>('/api/_auth/session')
       expect(session).not.toHaveProperty('claims')
+    })
+
+    it('does not claim an anonymous caller needs re-authorization', async () => {
+      // The flag describes a session grant, and an anonymous caller has none. Reporting
+      // `true` here would prompt visitors who have never signed in to "reconnect".
+      const session = await $fetch<Record<string, unknown>>('/api/_auth/session')
+      expect(session.needsReauthorization).toBeUndefined()
     })
 
     it('publishes the profile and the resolved verified verdict', async () => {
