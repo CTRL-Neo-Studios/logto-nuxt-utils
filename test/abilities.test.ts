@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeAuthorizationResponse } from 'nuxt-authorization/utils'
 import type { AuthContext } from '../src/runtime/types'
+import { profileFromClaims } from '../src/runtime/shared/core'
 import {
   allOfAbilities,
   anyOfAbilities,
@@ -29,6 +30,7 @@ function context(overrides: Partial<AuthContext> = {}): AuthContext {
     scopes: [],
     organizations: [],
     organizationRoles: {},
+    profile: profileFromClaims(undefined),
     ...overrides,
   }
 }

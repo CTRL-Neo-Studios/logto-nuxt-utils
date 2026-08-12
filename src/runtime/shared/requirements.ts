@@ -5,6 +5,7 @@ import {
   ctxHasOrganizationRole,
   ctxHasRole,
   ctxMissingPermissions,
+  verifiedFromClaims,
 } from './core'
 
 /**
@@ -95,8 +96,13 @@ export type RequirementResult =
  * bearer caller, since access tokens do not carry the claim.
  */
 export function ctxIsVerified(ctx: AuthContext | null | undefined): boolean {
-  const claim = ctx?.claims?.email_verified
-  return typeof claim === 'boolean' ? claim : true
+  // Prefer the claim itself when present: a server-side caller has the real ID token.
+  if (ctx?.claims) return verifiedFromClaims(ctx.claims)
+
+  // The browser is deliberately never given `claims`, so it reads the verdict the session
+  // endpoint resolved. Absent (a synthetic or legacy context) keeps the historical
+  // "nothing to check, so not unverified" behaviour.
+  return ctx?.isVerified ?? true
 }
 
 /**

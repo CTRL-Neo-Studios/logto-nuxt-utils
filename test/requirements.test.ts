@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AuthContext } from '../src/runtime/types'
+import { profileFromClaims } from '../src/runtime/shared/core'
 import {
   checkRequirements,
   ctxIsVerified,
@@ -16,6 +17,7 @@ function context(overrides: Partial<AuthContext> = {}): AuthContext {
     scopes: [],
     organizations: [],
     organizationRoles: {},
+    profile: profileFromClaims(undefined),
     ...overrides,
   }
 }
@@ -174,6 +176,21 @@ describe('checkRequirements', () => {
       expect(checkRequirements(context(), { verified: true }).ok).toBe(true)
       expect(checkRequirements(context({ source: 'bearer' }), { verified: true }).ok).toBe(true)
       expect(checkRequirements(context({ source: 'bearer' })).ok).toBe(true)
+    })
+
+    it('rejects a claim-less context whose resolved `isVerified` is false', () => {
+      // The client never receives `claims`, so the session endpoint resolves the verdict
+      // for it. Reading only `claims` here made every client-side `verified` check pass
+      // while the server returned 403.
+      expect(checkRequirements(
+        context({ isVerified: false }),
+        { verified: true },
+      )).toMatchObject({ ok: false, failed: 'verified', statusCode: 403 })
+    })
+
+    it('admits that same context on an explicit opt-out', () => {
+      expect(checkRequirements(context({ isVerified: false }), { verified: false }).ok)
+        .toBe(true)
     })
   })
 

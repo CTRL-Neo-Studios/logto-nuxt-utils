@@ -4,6 +4,7 @@ import {
   createAnonymousContext,
   parseOrganizationRoles,
   parseScopeClaim,
+  profileFromClaims,
   toStringArray,
 } from '../src/runtime/shared/core'
 
@@ -53,6 +54,43 @@ describe('claim parsing', () => {
       expect(parseOrganizationRoles(['noseparator', ':leading', 'trailing:'])).toEqual({})
     })
   })
+
+  describe('profileFromClaims', () => {
+    it('normalises present claims, treating blank and wrong-typed ones as absent', () => {
+      expect(profileFromClaims({
+        sub: 'user_1',
+        name: 'Ada',
+        email: '',
+        email_verified: true,
+        picture: 42,
+      })).toEqual({
+        sub: 'user_1',
+        name: 'Ada',
+        username: null,
+        email: null,
+        emailVerified: true,
+        phoneNumber: null,
+        phoneNumberVerified: false,
+        picture: null,
+      })
+    })
+
+    it('fills every key for absent claims, so `profile.name` needs no optional chaining', () => {
+      const profile = profileFromClaims(undefined)
+
+      expect(profile).toEqual({
+        sub: null,
+        name: null,
+        username: null,
+        email: null,
+        emailVerified: false,
+        phoneNumber: null,
+        phoneNumberVerified: false,
+        picture: null,
+      })
+      expect(Object.values(profile).some(value => value === undefined)).toBe(false)
+    })
+  })
 })
 
 describe('contextFromAccessTokenClaims', () => {
@@ -71,6 +109,20 @@ describe('contextFromAccessTokenClaims', () => {
     // `roles` is an ID-token claim, so a plain access token has none.
     const ctx = contextFromAccessTokenClaims({ sub: 'user_1', scope: 'a' })
     expect(ctx.roles).toEqual([])
+  })
+
+  it('carries a sparse profile and counts as verified without the claim', () => {
+    // An access token has `sub` but no profile claims, and no `email_verified` at all —
+    // treating that absence as unverified would reject every service-to-service call.
+    const ctx = contextFromAccessTokenClaims({ sub: 'user_1', scope: 'a', email: 'a@b.c' })
+
+    expect(ctx.profile).toMatchObject({ sub: 'user_1', email: 'a@b.c', name: null })
+    expect(ctx.isVerified).toBe(true)
+  })
+
+  it('reports an explicitly unverified bearer caller', () => {
+    const ctx = contextFromAccessTokenClaims({ sub: 'user_1', email_verified: false })
+    expect(ctx.isVerified).toBe(false)
   })
 
   it('honours a roles claim added by a JWT customizer', () => {

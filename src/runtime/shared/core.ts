@@ -1,4 +1,4 @@
-import type { AuthContext, Permission } from '../types'
+import type { AuthContext, LogtoUserProfile, Permission } from '../types'
 
 /**
  * Framework-free helpers shared by the server guards and the client abilities.
@@ -21,7 +21,49 @@ export function createAnonymousContext(): AuthContext {
     scopes: [],
     organizations: [],
     organizationRoles: {},
+    profile: profileFromClaims(undefined),
+    // An anonymous caller fails on `unauthenticated` long before verification, so this
+    // is inert and avoids implying a second failure reason.
+    isVerified: true,
   }
+}
+
+/** Reads a claim as a non-empty string, or `null`. */
+function readStringClaim(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+/**
+ * Normalises token claims into a {@link LogtoUserProfile}.
+ *
+ * Tolerates any input because claims arrive as `Record<string, unknown>`: a claim of the
+ * wrong type is treated as absent rather than trusted or thrown on.
+ */
+export function profileFromClaims(
+  claims: Record<string, unknown> | undefined,
+): LogtoUserProfile {
+  return {
+    sub: readStringClaim(claims?.sub),
+    name: readStringClaim(claims?.name),
+    username: readStringClaim(claims?.username),
+    email: readStringClaim(claims?.email),
+    emailVerified: claims?.email_verified === true,
+    phoneNumber: readStringClaim(claims?.phone_number),
+    phoneNumberVerified: claims?.phone_number_verified === true,
+    picture: readStringClaim(claims?.picture),
+  }
+}
+
+/**
+ * Whether these claims satisfy the `verified` requirement.
+ *
+ * An absent `email_verified` claim counts as verified: it is an ID-token claim, so bearer
+ * callers carry none, and treating absence as unverified would reject every
+ * service-to-service call. Only an explicit `false` fails.
+ */
+export function verifiedFromClaims(claims: Record<string, unknown> | undefined): boolean {
+  const claim = claims?.email_verified
+  return typeof claim === 'boolean' ? claim : true
 }
 
 /**
@@ -157,5 +199,7 @@ export function contextFromAccessTokenClaims(payload: Record<string, unknown>): 
     organizations: toStringArray(payload.organizations),
     organizationRoles: parseOrganizationRoles(payload.organization_roles),
     claims: payload,
+    profile: profileFromClaims(payload),
+    isVerified: verifiedFromClaims(payload),
   }
 }

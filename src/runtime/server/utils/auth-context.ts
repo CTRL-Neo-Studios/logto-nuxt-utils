@@ -5,7 +5,9 @@ import {
   createAnonymousContext,
   parseOrganizationRoles,
   parseScopeClaim,
+  profileFromClaims,
   toStringArray,
+  verifiedFromClaims,
 } from '../../shared/core'
 import {
   type ServerLogtoClient,
@@ -194,6 +196,8 @@ async function buildSessionAuthContext(event: H3Event): Promise<AuthContext> {
     organizations: toStringArray(claims?.organizations),
     organizationRoles: parseOrganizationRoles(claims?.organization_roles),
     claims: claims as Record<string, unknown> | undefined,
+    profile: profileFromClaims(claims as Record<string, unknown> | undefined),
+    isVerified: verifiedFromClaims(claims as Record<string, unknown> | undefined),
   }
 }
 

@@ -31,19 +31,37 @@ type AuthorizationResolverPlugin =
 const plugin: AuthorizationResolverPlugin = defineNuxtPlugin({
   name: 'logto-rbac:authorization-resolver',
   parallel: true,
-  setup() {
+  setup(nuxtApp) {
+    // A consumer plugin that ran first already owns `$authorization`. Nuxt's
+    // `provide` uses a non-configurable `Object.defineProperty`, so returning a
+    // `provide` block here would throw `Cannot redefine property`. Yield instead:
+    // whoever resolves the user first wins, and the build-time check in the module
+    // has already warned about the duplicate.
+    //
+    // `Object.hasOwn` rather than `in`: `nuxt-authorization` declares
+    // `$authorization` as always present on `NuxtApp`, so `in` would narrow the
+    // remaining body to `never`. It is also the accurate test — Nuxt's `provide`
+    // defines an own property, never an inherited one.
+    if (Object.hasOwn(nuxtApp, '$authorization')) return
+
     const auth = useAuthorization()
 
-    return {
-      provide: {
-        authorization: {
-          // `null` for guests, so abilities without `allowGuest` deny by default.
-          resolveClientUser: async () => {
-            const ctx = await auth.resolve()
-            return ctx?.isAuthenticated ? ctx : null
-          },
-        },
+    // Defined directly rather than via the returned `provide` block so the
+    // descriptor can be `configurable`, letting a consumer plugin that runs *after*
+    // this one override it instead of crashing.
+    const authorization = {
+      // `null` for guests, so abilities without `allowGuest` deny by default.
+      resolveClientUser: async () => {
+        const ctx = await auth.resolve()
+        return ctx?.isAuthenticated ? ctx : null
       },
+    }
+
+    for (const target of [nuxtApp, nuxtApp.vueApp.config.globalProperties]) {
+      Object.defineProperty(target, '$authorization', {
+        get: () => authorization,
+        configurable: true,
+      })
     }
   },
 })

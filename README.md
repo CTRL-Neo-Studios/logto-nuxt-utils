@@ -191,10 +191,59 @@ const isVerifiedEditor = computed(() =>
 | `canAny(…perms)` | at least one is held |
 | `hasRole(…roles)` | exact role match |
 | `satisfies(reqs)` | the full declarative check |
-| `user` / `isAuthenticated` / `scopes` / `roles` | reactive state |
+| `missingPermissions(…perms)` | the subset not held, for actionable messages |
+| `isOrganizationMember(id)` / `hasOrganizationRole(id, …roles)` | organization checks |
+| `explain(reqs)` | the guards' full verdict: `failed` / `required` / `held` |
+| `profile` | the normalised Logto user — always an object, every field `string \| null` |
+| `displayName` | always a `string`: `name` → `username` → `email` → `phoneNumber` → `sub` → `'Guest'` |
+| `user` / `isAuthenticated` / `scopes` / `roles` / `source` / `userId` / `organizations` | reactive state |
+| `pending` / `error` / `ready` | resolution state; `ready` distinguishes "no" from "not yet" |
 | `resolve()` / `refresh()` | ensure fetched / refetch |
 
 Because these read a ref, calling them inside `computed()` is reactive.
+
+`profile` is why a template needs no `?.` chain: unlike `useLogtoUser()` — which returns
+`UserInfoResponse | IdTokenClaims | undefined` and whose every field is `Nullable<string>`
+— `profile` is always present, its fields are never `undefined`, an empty claim is
+normalised to `null`, and it is populated for bearer callers too. `useLogtoUser()` remains
+available for raw ID-token claims.
+
+### `useCan()`
+
+`can()` only means anything after `resolve()`; forgetting that `await` yields a silent
+`false`. `useCan()` resolves itself, SSR included, and takes the same shorthand as the
+gates:
+
+```vue
+<script setup lang="ts">
+const canEdit = useCan('assessment:edit')
+const canManage = useCan(['assessment:edit', 'assessment:delete'])   // ALL
+const canReview = useCan({ anyPermission: ['assessment:edit', 'assessment:share'] })
+</script>
+```
+
+It is `false` in prerendered HTML by design — there is no request-bound cookie — and
+re-evaluates on the client once the session exists.
+
+### `useLogtoSession()`
+
+Logto's pathnames live in private runtime config, so the browser cannot read them. The
+module mirrors both into public config:
+
+```vue
+<script setup lang="ts">
+const session = useLogtoSession()
+</script>
+
+<template>
+  <button @click="session.signIn()">Sign in</button>
+  <button @click="session.signOut()">Sign out</button>
+</template>
+```
+
+`signInPath` / `signOutPath` are also exposed if you would rather render a link. There is
+no `returnTo` argument: `@logto/nuxt` redirects to its statically configured
+`postCallbackRedirectUri` and ignores query parameters, so one could not be honoured.
 
 ### Route guards
 
@@ -382,6 +431,10 @@ of bug by construction.
   scopes: string[]
   organizations: string[]
   organizationRoles: Record<string, string[]>
+  /** Always present; all-`null` for a guest, sparse (`sub` only) for a bearer caller. */
+  profile: LogtoUserProfile
+  /** Resolved server-side so the browser evaluates the same `verified` rule. */
+  isVerified?: boolean
 }
 ```
 

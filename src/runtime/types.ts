@@ -52,6 +52,39 @@ export type AuthSource
     | 'anonymous'
 
 /**
+ * The Logto user, normalised into a shape that is pleasant to consume.
+ *
+ * Every field is present, so `profile.name` needs no optional chaining. Absent claims
+ * become `null` rather than `undefined`, collapsing the `string | null | undefined` that
+ * `@logto/js` declares (`Nullable<string>` on an optional property) down to one nullable
+ * state instead of two. An empty string is normalised to `null` as well, since Logto
+ * returns `""` for cleared fields and "present but blank" is never a useful distinction
+ * for a caller.
+ *
+ * Keys are camelCase, unlike the underlying snake_case OIDC claims: this is the module's
+ * own shape, and `claims` on {@link AuthContext} remains available for anything not
+ * modelled here.
+ */
+export interface LogtoUserProfile {
+  /** Logto user id (the `sub` claim). */
+  sub: string | null
+  name: string | null
+  username: string | null
+  email: string | null
+  /**
+   * True only when `email_verified` is explicitly `true`.
+   *
+   * This is the honest reading of the claim, and is deliberately *not* the input to the
+   * `verified` requirement — see {@link AuthContext.isVerified}, which treats an absent
+   * claim as verified so bearer callers are not locked out.
+   */
+  emailVerified: boolean
+  phoneNumber: string | null
+  phoneNumberVerified: boolean
+  picture: string | null
+}
+
+/**
  * Normalised view of "who is calling and what may they do", independent of
  * whether the caller authenticated with a session cookie or a bearer token.
  *
@@ -95,6 +128,21 @@ export interface AuthContext {
   organizationRoles: Record<string, string[]>
   /** Raw token claims, for callers needing something not modelled above. */
   claims?: Record<string, unknown>
+  /**
+   * The normalised Logto user. Always present; all-`null` for an anonymous caller, and
+   * sparse for a bearer caller, whose access token carries `sub` but no profile claims.
+   */
+  profile: LogtoUserProfile
+  /**
+   * Whether the caller counts as verified for the `verified` requirement.
+   *
+   * Resolved server-side so the browser can evaluate the same rule: an **absent**
+   * `email_verified` claim counts as verified (bearer tokens carry none), while an
+   * explicit `false` does not. Optional so the many synthetic contexts in tests stay
+   * valid; when absent, `ctxIsVerified` falls back to `true`, which is the pre-existing
+   * behaviour for a claim-less context.
+   */
+  isVerified?: boolean
 }
 
 /**

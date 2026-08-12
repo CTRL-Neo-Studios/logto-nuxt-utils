@@ -10,6 +10,14 @@ export default defineNuxtConfig({
     appId: 'fixture-app-id',
     appSecret: 'fixture-app-secret',
     cookieEncryptionKey: 'fixture-cookie-encryption-key',
+
+    // Deliberately non-default, so mirroring into public config is proven rather than
+    // coincidentally matching a default.
+    pathnames: {
+      signIn: '/enter',
+      signOut: '/leave',
+      callback: '/cb',
+    },
   },
 
   logtoRbac: {

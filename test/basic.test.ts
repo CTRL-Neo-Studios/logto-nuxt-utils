@@ -90,6 +90,24 @@ describe('logto-nuxt-utils', async () => {
       const session = await $fetch<Record<string, unknown>>('/api/_auth/session')
       expect(session).not.toHaveProperty('claims')
     })
+
+    it('publishes the profile and the resolved verified verdict', async () => {
+      // Without these the browser has no user to render and, since it never receives
+      // `claims`, no way to evaluate the `verified` requirement the server enforces.
+      const session = await $fetch<Record<string, unknown>>('/api/_auth/session')
+
+      expect(session.profile).toEqual({
+        sub: null,
+        name: null,
+        username: null,
+        email: null,
+        emailVerified: false,
+        phoneNumber: null,
+        phoneNumberVerified: false,
+        picture: null,
+      })
+      expect(session.isVerified).toBe(true)
+    })
   })
 
   describe('guards', () => {
@@ -137,6 +155,28 @@ describe('logto-nuxt-utils', async () => {
       const body = await response.json() as { data?: { failed?: string } }
 
       expect(body.data?.failed).toBe('unauthenticated')
+    })
+  })
+
+  describe('client utilities', () => {
+    it('renders the client surface for an anonymous visitor', async () => {
+      // SSR-rendered rather than mocked: this is the only proof that the composables
+      // resolve through the real session endpoint and that both Logto pathnames reach
+      // the browser through public runtime config.
+      const html = await $fetch<string>('/')
+
+      expect(html).toContain('<p id="can-view">false</p>')
+      // Always a string, so a template never has to spell out a fallback.
+      expect(html).toContain('<p id="display-name">Guest</p>')
+      // Present and null-filled, not `undefined`.
+      expect(html).toContain('<p id="profile-name"></p>')
+      expect(html).toContain('<p id="sign-in-path">/enter</p>')
+      expect(html).toContain('<p id="sign-out-path">/leave</p>')
+      expect(html).toContain('<p id="source">anonymous</p>')
+      // The guards' machine-readable verdict, available client-side too.
+      expect(html).toContain('<p id="failed">unauthenticated</p>')
+      // Regresses if `useCan`'s prefetch or the per-app pending state is wrong.
+      expect(html).toContain('<p id="ready">true</p>')
     })
   })
 })

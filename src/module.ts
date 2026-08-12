@@ -119,6 +119,19 @@ export interface ModuleOptions {
    * it should stay visible there.
    */
   installAuthorizationModule?: boolean
+  /**
+   * Register the client-side `$authorization` resolver plugin.
+   *
+   * Set to `false` when the consuming project supplies its own
+   * `plugins/authorization-resolver.ts`. Nuxt's `provide` defines a
+   * non-configurable property, so two plugins providing `authorization` make the
+   * second one throw `Cannot redefine property: $authorization`.
+   *
+   * Leaving this `true` is safe: the module detects a consumer-supplied resolver at
+   * build time and steps aside automatically. Setting it to `false` silences the
+   * warning that detection emits.
+   */
+  installClientResolver?: boolean
 }
 
 /**
@@ -158,7 +171,7 @@ interface MutableLogtoRuntimeConfig {
   scopes?: string[]
   resources?: string[]
   fetchUserInfo?: boolean
-  pathnames?: { signIn?: string }
+  pathnames?: { signIn?: string, signOut?: string }
 }
 
 function unique(values: Iterable<string>): string[] {
@@ -178,6 +191,7 @@ export default defineNuxtModule<ModuleOptions>({
     userScopes: [],
     sessionEndpoint: '/api/_auth/session',
     installAuthorizationModule: true,
+    installClientResolver: true,
   },
   async setup(options, nuxt) {
     const logger = useLogger('logto-rbac')
@@ -306,6 +320,8 @@ export default defineNuxtModule<ModuleOptions>({
       // config, so the browser has no other way to discover it.
       nuxt.options.runtimeConfig.public.logtoRbac.signInPath
         = logto.pathnames?.signIn ?? '/sign-in'
+      nuxt.options.runtimeConfig.public.logtoRbac.signOutPath
+        = logto.pathnames?.signOut ?? '/sign-out'
     })
 
     /**
@@ -324,6 +340,7 @@ export default defineNuxtModule<ModuleOptions>({
     nuxt.options.runtimeConfig.public.logtoRbac = {
       sessionEndpoint,
       signInPath: '/sign-in',
+      signOutPath: '/sign-out',
     }
 
     // -------------------------------------------------------------- wiring
@@ -391,6 +408,11 @@ export default defineNuxtModule<ModuleOptions>({
         name: 'defineAuthMiddleware',
         from: resolver.resolve('./runtime/app/utils/auth-middleware'),
       },
+      { name: 'useCan', from: resolver.resolve('./runtime/app/composables/useCan') },
+      {
+        name: 'useLogtoSession',
+        from: resolver.resolve('./runtime/app/composables/useLogtoSession'),
+      },
     ])
 
     addServerPlugin(resolver.resolve('./runtime/server/plugins/authorization'))
@@ -401,7 +423,54 @@ export default defineNuxtModule<ModuleOptions>({
       handler: resolver.resolve('./runtime/server/api/session.get'),
     })
 
-    addPlugin(resolver.resolve('./runtime/app/plugins/authorization-resolver'))
+    const clientResolverSrc = resolver.resolve('./runtime/app/plugins/authorization-resolver')
+
+    /**
+     * Whether `src` is *this* module's client resolver.
+     *
+     * A prefix test rather than `===`: `resolveApp` runs `resolvePaths` over the
+     * plugin list *before* it fires `app:resolve`, so by then `src` carries the
+     * resolved extension (`…/authorization-resolver.ts`) while `resolver.resolve`
+     * returns the extensionless path. An equality check would never match.
+     */
+    const isOwnClientResolver = (src: string): boolean =>
+      src === clientResolverSrc || src.startsWith(`${clientResolverSrc}.`)
+
+    if (options.installClientResolver !== false) {
+      addPlugin(clientResolverSrc)
+
+      /**
+       * Steps aside when the project supplies its own client resolver.
+       *
+       * Nuxt's `provide` defines a non-configurable property, and module plugins are
+       * unshifted ahead of scanned app plugins, so shipping ours unconditionally makes
+       * the *consumer's* plugin throw `Cannot redefine property: $authorization`.
+       *
+       * `app:resolve` is the earliest hook where `app.plugins` holds both the module
+       * plugins and the ones scanned from `app/plugins/`, which is what makes the
+       * consumer's file detectable at all.
+       */
+      nuxt.hook('app:resolve', (app) => {
+        const theirs = app.plugins.filter(
+          plugin => !isOwnClientResolver(plugin.src)
+            && /authorization-resolver/u.test(plugin.src),
+        )
+
+        if (theirs.length === 0) return
+
+        app.plugins = app.plugins.filter(plugin => !isOwnClientResolver(plugin.src))
+
+        logger.warn(
+          'A project-level authorization resolver was found at '
+          + `${theirs.map(plugin => relative(nuxt.options.rootDir, plugin.src)).join(', ')}, `
+          + 'so this module\'s own client resolver was not registered — two plugins '
+          + 'providing `authorization` would throw "Cannot redefine property: '
+          + '$authorization". Your resolver is being used. Either delete it to use the '
+          + 'module\'s Logto-backed resolver, or set `logtoRbac.installClientResolver: '
+          + 'false` in nuxt.config to silence this warning.',
+        )
+      })
+    }
 
     // --------------------------------------------------------------- types
 
@@ -524,6 +593,8 @@ declare module '@nuxt/schema' {
       sessionEndpoint: string
       /** Logto sign-in path, mirrored from private config for client-side guards. */
       signInPath: string
+      /** Logto sign-out path, mirrored from private config for client-side navigation. */
+      signOutPath: string
     }
   }
 }
