@@ -1,11 +1,10 @@
 {
   "name": "@type32/logto-nuxt-utils",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Logto RBAC utilities for Nuxt: typed permissions, server guards and cross-instance token verification.",
   "repository": "https://github.com/CTRL-Neo-Studios/logto-nuxt-utils",
   "license": "MIT",
   "type": "module",
-  "packageManager": "pnpm@11.18.0",
   "exports": {
     ".": {
       "types": "./dist/types.d.mts",

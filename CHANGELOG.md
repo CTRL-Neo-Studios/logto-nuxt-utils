@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.9
+
+[compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.8...v0.1.9)
+
+### 🚀 Enhancements
+
+- **auth:** Revalidate permissions and flag sessions needing reauthorization ([17be3a6](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/commit/17be3a6))
+
+### ❤️ Contributors
+
+- Type-32 ([@Type-32](https://github.com/Type-32))
+
 ## v0.1.8
 
 [compare changes](https://github.com/CTRL-Neo-Studios/logto-nuxt-utils/compare/v0.1.7...v0.1.8)
