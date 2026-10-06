@@ -43,23 +43,23 @@
   },
   "dependencies": {
     "@nuxt/kit": "^4.5.2",
-    "jose": "^6.2.8",
+    "jose": "^6.2.12",
     "nuxt-authorization": "^0.3.5"
   },
   "peerDependencies": {
     "@logto/nuxt": ">=1.2.0"
   },
   "devDependencies": {
-    "@logto/nuxt": "^1.2.10",
-    "@nuxt/devtools": "^3.4.1",
+    "@logto/nuxt": "^2.0.0",
+    "@nuxt/devtools": "^4.0.0-beta.3",
     "@nuxt/module-builder": "^1.0.3",
     "@nuxt/schema": "^4.5.2",
-    "@nuxt/test-utils": "^4.1.0",
+    "@nuxt/test-utils": "^4.3.3",
     "@types/node": "latest",
     "changelogen": "^0.6.2",
-    "nuxt": "^4.5.2",
-    "typescript": "~6.0.3",
-    "vitest": "^4.1.10",
-    "vue-tsc": "^3.3.9"
+    "nuxt": "^4.6.0",
+    "typescript": "6.0.3",
+    "vitest": "^5.0.3",
+    "vue-tsc": "^3.3.12"
   }
 }
